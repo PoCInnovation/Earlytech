@@ -30,11 +30,19 @@ def upsert_article(article: Dict[str, Any]):
     tags = _to_pg_array(article.get("tags") or [])
     keywords = _to_pg_array(article.get("keywords") or [])
     full_text = article.get("full_text") or ""
+    pdf_path = article.get("pdf_path")
     source = article.get("source")
     source_url = article.get("source_url")
     author = article.get("author")
     published_at = article.get("published_at")
     scraped_at = article.get("scraped_at") or datetime.utcnow()
+    # normalize scraped_at if provided as ISO string
+    if isinstance(scraped_at, str):
+        try:
+            scraped_at = datetime.fromisoformat(scraped_at)
+        except Exception:
+            # leave as-is; psycopg2 can accept many string datetime formats
+            pass
     cluster_id = article.get("cluster_id")
     confidence_score = article.get("confidence_score")
     notified = article.get("notified", False)
@@ -44,6 +52,7 @@ def upsert_article(article: Dict[str, Any]):
     sql = """
     INSERT INTO articles (
         title, description, summary, tags, keywords, full_text,
+        pdf_path,
         source, source_url, author, published_at, scraped_at,
         cluster_id, confidence_score, notified, notification_sent_at
     ) VALUES (
@@ -58,6 +67,7 @@ def upsert_article(article: Dict[str, Any]):
         tags = EXCLUDED.tags,
         keywords = EXCLUDED.keywords,
         full_text = EXCLUDED.full_text,
+        pdf_path = EXCLUDED.pdf_path,
         author = EXCLUDED.author,
         published_at = EXCLUDED.published_at,
         scraped_at = EXCLUDED.scraped_at,
@@ -70,6 +80,7 @@ def upsert_article(article: Dict[str, Any]):
 
     params = [
         title, description, summary, tags, keywords, full_text,
+        pdf_path,
         source, source_url, author, published_at, scraped_at,
         cluster_id, confidence_score, notified, notification_sent_at
     ]

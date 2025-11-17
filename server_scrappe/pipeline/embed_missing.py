@@ -52,8 +52,8 @@ def fetch_missing(conn, limit: int):
     if has_embedding_json:
         conds.append('embedding_json IS NULL')
     if not conds:
-        # nothing to do
-        return []
+        # nothing to do: return consistent tuple to avoid unpacking errors
+        return [], has_embedding, has_embedding_json
 
     where = ' OR '.join(conds)
     sql = f"SELECT id, full_text FROM articles WHERE ({where}) ORDER BY id LIMIT %s"

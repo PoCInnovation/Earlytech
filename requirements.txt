@@ -1,0 +1,9 @@
+requests
+beautifulsoup4
+feedparser
+arxiv
+psycopg2-binary
+python-dotenv
+pytest
+sqlalchemy
+pdfplumber

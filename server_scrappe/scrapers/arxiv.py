@@ -56,13 +56,28 @@ class ArxivWrapper(BaseScraper):
         )
         for result in search.results():
             pdf_path = download_pdf(result.entry_id)
+            # If pdf_text extraction wrote a .txt next to the pdf, prefer it as full_text
+            full_text = result.summary
+            try:
+                from pathlib import Path
+                if pdf_path:
+                    txt_path = Path(pdf_path).with_suffix('.txt')
+                    if txt_path.exists():
+                        with open(txt_path, 'r', encoding='utf-8') as tf:
+                            txt = tf.read().strip()
+                            if txt:
+                                full_text = txt
+            except Exception:
+                # fall back to summary
+                full_text = result.summary
+
             results.append({
                 "title": result.title,
                 "description": result.summary,
                 "summary": result.summary,
                 "tags": [],
                 "keywords": [],
-                "full_text": result.summary,
+                "full_text": full_text,
                 "source": "arxiv",
                 "source_url": result.entry_id,
                 "author": ", ".join([a.name for a in result.authors]),
