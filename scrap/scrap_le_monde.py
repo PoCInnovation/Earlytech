@@ -3,7 +3,6 @@ import time
 from datetime import datetime
 from typing import List, Dict
 
-# Constantes de l'outil de veille
 SOURCE_SITE = "le_monde"
 
 FEEDS = [
@@ -16,14 +15,12 @@ def normalize_lemonde_entry(entry: feedparser.FeedParserDict, feed_url: str) -> 
     """Normalise une entrée RSS Le Monde dans le format unifié."""
     entry_id = getattr(entry, "id", None) or getattr(entry, "link", None)
     
-    # Déterminer la date
     published_date = datetime.utcnow().isoformat()
     if getattr(entry, "published_parsed", None):
         published_date = datetime.fromtimestamp(time.mktime(entry.published_parsed)).isoformat()
     elif getattr(entry, "updated_parsed", None):
         published_date = datetime.fromtimestamp(time.mktime(entry.updated_parsed)).isoformat()
         
-    # Extraire la catégorie du flux si possible
     category = "actualité générale"
     if "international" in feed_url:
         category = "international"
@@ -38,7 +35,7 @@ def normalize_lemonde_entry(entry: feedparser.FeedParserDict, feed_url: str) -> 
         "title": getattr(entry, "title", ""),
         "description": getattr(entry, "summary", ""),
         "author_info": getattr(entry, "author", "Le Monde"),
-        "keywords": category, # Utiliser la catégorie du flux comme mot-clé principal
+        "keywords": category,
         "content_url": getattr(entry, "link", ""),
         "published_date": published_date,
         "item_type": "article",
@@ -61,7 +58,7 @@ def scrape_lemonde(feeds: List[str] = FEEDS) -> List[Dict]:
                     
         except Exception as e:
             print(f"[ERREUR] du fetch du feed {feed_url}: {e}")
-        time.sleep(1) # Petite pause entre les flux
+        time.sleep(1)
 
     return all_items
 

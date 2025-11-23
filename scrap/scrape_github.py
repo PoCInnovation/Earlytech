@@ -3,11 +3,9 @@ import requests
 from datetime import datetime, UTC
 from typing import List, Dict
 
-# Constantes de l'outil de veille
 SOURCE_SITE = "github"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") 
 
-# ... (THEMES, HEADERS, RateLimitError, sanitize_text, normalize_github_repo, build_query_for_theme restent inchangés) ...
 
 THEMES = [
     "large-language-model", "llm", "transformer", "text-generation", "retrieval-augmented-generation",
@@ -69,24 +67,17 @@ def search_github_repos(query: str, per_page: int = 20) -> List[Dict]:
         
         if resp.status_code == 403:
             retry_after = resp.headers.get("Retry-After")
-            # Lève l'erreur pour la gestion du break dans scrape_github
             raise RateLimitError(retry_after=int(retry_after) if retry_after and retry_after.isdigit() else None)
-        
-        # 🎯 CORRECTION CLÉ DANS CE BLOC :
-        # Utiliser 'resp.raise_for_status()' si vous souhaitez détecter les 4xx/5xx généraux, 
-        # mais pour la robustesse, nous allons d'abord vérifier le statut et analyser le JSON.
-        
+                
         if resp.status_code != 200:
-             # Pour toutes les autres erreurs non 403, nous loguons et retournons vide.
              print(f"[WARN] HTTP Status {resp.status_code} for query: {query}")
              return []
         
-        # Si le statut est 200, nous essayons d'analyser le JSON
         data = resp.json()
         return data.get("items", [])
         
     except RateLimitError:
-        raise # Relance RateLimitError
+        raise
     except requests.exceptions.RequestException as e:
         print(f"[ERREUR CONNEXION/HTTP] GitHub Search: {e}")
         return []
@@ -99,7 +90,7 @@ def scrape_github(themes: List[str] = THEMES, limit_per_theme: int = 20) -> List
     """Scrape GitHub pour les thèmes donnés et retourne les éléments unifiés."""
     
     all_items = []
-    stop_scraping = False # Drapeau de contrôle
+    stop_scraping = False
     
     try:
         for theme in themes:
@@ -112,7 +103,6 @@ def scrape_github(themes: List[str] = THEMES, limit_per_theme: int = 20) -> List
             try:
                 items = search_github_repos(q, limit_per_theme)
                 
-                # SÉCURITÉ SUPPLÉMENTAIRE :
                 if not isinstance(items, list):
                     print(f"[FATAL WARN] search_github_repos a retourné {type(items)} au lieu de list. Arrêt.")
                     stop_scraping = True
@@ -122,11 +112,9 @@ def scrape_github(themes: List[str] = THEMES, limit_per_theme: int = 20) -> List
                 all_items.extend(normalized_items)
                 
             except RateLimitError:
-                # Gère spécifiquement l'erreur de Rate Limit
                 print(f"[RATE LIMIT] Limite atteinte. Arrêt de la veille GitHub pour cette itération.")
                 stop_scraping = True
             except Exception as e:
-                # Gère toutes les autres exceptions de niveau thème (très peu probables maintenant)
                 print(f"[ERREUR THÈME] '{theme}': {e}")
                 continue 
                 

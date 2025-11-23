@@ -1,12 +1,8 @@
 import sqlite3
-# Importation de UTC pour la gestion moderne du temps
 from datetime import datetime, UTC 
 from typing import List, Dict
 import time
 import os
-
-# 💡 Assurez-vous d'importer vos fonctions de scraping normalisées
-# J'utilise les noms de modules que vous avez fournis
 from scrape_hf import scrape_huggingface
 from scrape_github import scrape_github
 from medium_scraping import scrape_medium
@@ -41,10 +37,8 @@ def setup_database():
 def save_unified_item(item: Dict, conn: sqlite3.Connection):
     """Insère un élément unifié dans la base de données."""
     cur = conn.cursor()
-    # ✅ CORRECTION 1: Utilisation de datetime.now(UTC) pour éviter la dépréciation
     now = datetime.now(UTC).isoformat()
     
-    # Utilisation d'INSERT OR IGNORE pour gérer le dédoublonnage par l'ID
     cur.execute("""
     INSERT OR IGNORE INTO unified_data 
     (id, source_site, title, description, author_info, keywords, content_url, published_date, item_type, created_at)
@@ -86,32 +80,26 @@ def run_scrapers_and_save():
         try:
             items = scraper_func(limit) if limit is not None else scraper_func() 
             
-            # ✅ CORRECTION 2: Gestion robuste des types de retour non-itérables (comme int ou None)
             
-            # Si 'items' est None, ou non-itérable (int), nous le traitons.
             if items is None:
                 print(f"   ❌ **ALERTE: Le scraper {name} a retourné None. Skipping.**")
                 continue
             
-            # Tenter de vérifier l'itérabilité pour attraper l'erreur 'int' object is not iterable
             try:
-                # Si l'objet n'est pas itérable (ex: int 403), cette ligne lève une TypeError
                 iter(items)
                 
             except TypeError:
                 print(f"   ❌ **ERREUR FATALE (Non-Itérable)**: Le scraper {name} a retourné un type non itérable ({type(items)}). Skipping.")
                 continue
 
-            # À ce stade, 'items' est garanti d'être itérable, mais nous vérifions si c'est une liste
             if not isinstance(items, list):
                  print(f"   ⚠️ WARNING: Le scraper {name} a retourné un objet itérable ({type(items)}) mais pas une liste. Conversion en liste.")
-                 items = list(items) # Convertir en liste au cas où ce serait un tuple/set
+                 items = list(items)
                  
             print(f"   -> {len(items)} éléments récupérés.")
             
             count_saved = 0
             for item in items:
-                # La fonction save_unified_item gère le dédoublonnage (INSERT OR IGNORE)
                 save_unified_item(item, conn)
                 count_saved += 1
             
@@ -138,12 +126,10 @@ def check_results():
         print("La base de données est vide.")
         return
 
-    # Afficher les noms de colonnes
     column_names = [description[0] for description in cur.description]
     print(f"Colonnes: {column_names}")
     print("-" * 120)
 
-    # Afficher les données
     for row in rows:
         print(row)
         

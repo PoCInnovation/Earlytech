@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import time
 
-# Constantes de l'outil de veille
 SOURCE_SITE = "medium"
 
 RSS_FEEDS = [
@@ -17,7 +16,6 @@ def normalize_medium_entry(entry: feedparser.FeedParserDict) -> Dict:
     """Normalise une entrée RSS Medium dans le format unifié."""
     entry_id = entry.get('link', '')
     
-    # Conversion de la date
     published_date = datetime.utcnow().isoformat()
     if getattr(entry, "published_parsed", None):
         published_date = datetime.fromtimestamp(time.mktime(entry.published_parsed)).isoformat()
@@ -54,7 +52,7 @@ def scrape_medium(max_articles_per_feed: int = 10) -> List[Dict]:
             
         except Exception as e:
             print(f"❌ Error fetching {feed_url}: {e}")
-        time.sleep(1) # Respecter une pause entre les appels RSS
+        time.sleep(1)
 
     return all_items
 

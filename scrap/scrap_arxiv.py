@@ -11,8 +11,7 @@ def normalize_arxiv_result(paper: arxiv.Result) -> Dict:
     
     authors = ", ".join([a.name for a in paper.authors])
     
-    # Utiliser le lien de l'abstract comme ID/URL
-    link = paper.entry_id # C'est généralement l'URL de l'abstract dans la librairie
+    link = paper.entry_id
     
     keywords_list = [paper.primary_category]
     if paper.categories:
@@ -21,7 +20,7 @@ def normalize_arxiv_result(paper: arxiv.Result) -> Dict:
     return {
         "id": link,
         "source_site": SOURCE_SITE,
-        "title": paper.title.replace('\n', ' '), # Enlever les sauts de ligne dans le titre
+        "title": paper.title.replace('\n', ' '),
         "description": paper.summary.replace('\n', ' '),
         "author_info": authors,
         "keywords": ", ".join(keywords_list),
