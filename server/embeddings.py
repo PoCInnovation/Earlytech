@@ -111,15 +111,21 @@ class EmbeddingManager:
         """
         Generate embedding for complete article.
         
+        Uses full_content if available, otherwise combines title and description.
+        
         Args:
-            article: Dict with title and description
+            article: Dict with title, description, and optional full_content
             
         Returns:
             Serialized embedding in bytes
         """
-        title = article.get("title", "")
-        description = article.get("description", "")
-        text = f"{title}\n{description}"
+        full_content = article.get("full_content")
+        if full_content:
+            text = full_content
+        else:
+            title = article.get("title", "")
+            description = article.get("description", "")
+            text = f"{title}\n{description}"
         
         return self.embed_text(text)
     

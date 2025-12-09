@@ -60,11 +60,24 @@ class BaseScraper(ABC):
         keywords: str,
         content_url: str,
         published_date: str,
-        item_type: str = "article"
+        item_type: str = "article",
+        full_content: str = ""
     ) -> Dict:
         """
         Normalize item to unified format.
         
+        Args:
+            item_id: Unique item identifier
+            source_site: Source name
+            title: Item title
+            description: Short description/summary
+            author_info: Author information
+            keywords: Tags/keywords
+            content_url: URL to source
+            published_date: Publication date
+            item_type: Type of item
+            full_content: Complete article text (optional)
+            
         Returns:
             Dict with unified structure
         """
@@ -73,6 +86,7 @@ class BaseScraper(ABC):
             "source_site": source_site,
             "title": title,
             "description": description,
+            "full_content": full_content or description,
             "author_info": author_info,
             "keywords": keywords,
             "content_url": content_url,

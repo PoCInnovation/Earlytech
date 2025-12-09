@@ -33,6 +33,20 @@ class GithubScraper(BaseScraper):
         if self.token:
             self.headers["Authorization"] = f"Bearer {self.token}"
     
+    def _fetch_readme(self, full_name: str) -> str:
+        """Fetch README content from repository."""
+        try:
+            url = f"https://api.github.com/repos/{full_name}/readme"
+            headers = self.headers.copy()
+            headers["Accept"] = "application/vnd.github.v3.raw"
+            
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                return resp.text
+        except Exception:
+            pass
+        return ""
+    
     def _normalize_repo(self, repo: Dict, theme: str) -> Dict:
         """Normalize GitHub repository."""
         full_name = repo.get("full_name")
@@ -41,12 +55,17 @@ class GithubScraper(BaseScraper):
             keywords_list.extend(repo.get("topics"))
         
         updated_at = repo.get("updated_at") or repo.get("pushed_at")
+        description = repo.get("description") or ""
+        
+        readme = self._fetch_readme(full_name)
+        full_content = f"{description}\n\n{readme}" if readme else description
         
         return self.normalize_item(
             item_id=full_name,
             source_site=self.source_name,
             title=repo.get("name"),
-            description=repo.get("description") or "",
+            description=description,
+            full_content=full_content,
             author_info=repo.get("owner", {}).get("login", ""),
             keywords=", ".join(filter(None, keywords_list)),
             content_url=repo.get("html_url") or f"https://github.com/{full_name}",

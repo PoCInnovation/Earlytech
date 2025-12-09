@@ -32,6 +32,21 @@ class HuggingFaceScraper(BaseScraper):
         
         return base
     
+    def _fetch_model_card(self, item_id: str, item_type: str) -> str:
+        """Fetch model card or README from Hugging Face."""
+        try:
+            if item_type == "model":
+                url = f"https://huggingface.co/{item_id}/raw/main/README.md"
+            else:
+                url = f"https://huggingface.co/{item_id}/raw/main/README.md"
+            
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                return resp.text
+        except Exception:
+            pass
+        return ""
+    
     def _normalize_item(self, item: Dict, item_type: str) -> Dict:
         """Normalize Hugging Face item."""
         item_name = item.get("name") or item.get("modelId") or item.get("id")
@@ -49,11 +64,15 @@ class HuggingFaceScraper(BaseScraper):
         
         last_modified = item.get("lastModified") or item.get("last_modified") or datetime.now(UTC).isoformat()
         
+        model_card = self._fetch_model_card(item_id, item_type)
+        full_content = model_card if model_card else description
+        
         return self.normalize_item(
             item_id=item_id,
             source_site=self.source_name,
             title=item_name,
             description=description,
+            full_content=full_content,
             author_info=author,
             keywords=", ".join(keywords_list),
             content_url=self._build_url(item, item_type),

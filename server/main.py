@@ -105,10 +105,19 @@ class WatchServer:
         Returns:
             Number of new articles processed
         """
+        import hashlib
+        
         new_count = 0
         
         for article in articles:
             if self.db_manager.article_exists(article["id"]):
+                continue
+            
+            full_content = article.get("full_content", article.get("description", ""))
+            content_hash = hashlib.sha256(full_content.encode()).hexdigest()
+            
+            if self.db_manager.article_exists_by_hash(content_hash):
+                logger.debug(f"Article {article['id']} is duplicate (same content hash)")
                 continue
             
             if self.db_manager.save_article(article):

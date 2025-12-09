@@ -42,6 +42,8 @@ class DatabaseManager:
                 source_site TEXT NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT,
+                full_content TEXT,
+                content_hash TEXT UNIQUE,
                 author_info TEXT,
                 keywords TEXT,
                 content_url TEXT NOT NULL,
@@ -74,6 +76,9 @@ class DatabaseManager:
             )
             """)
             
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON articles(content_hash)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_source_site ON articles(source_site)")
+            
             conn.commit()
     
     def save_article(self, item: Dict, conn: Optional[sqlite3.Connection] = None) -> bool:
@@ -87,6 +92,8 @@ class DatabaseManager:
         Returns:
             True if inserted, False if already exists
         """
+        import hashlib
+        
         should_close = False
         if conn is None:
             conn = sqlite3.connect(self.db_path)
@@ -95,15 +102,20 @@ class DatabaseManager:
         try:
             cur = conn.cursor()
             
+            full_content = item.get("full_content", item.get("description", ""))
+            content_hash = hashlib.sha256(full_content.encode()).hexdigest()
+            
             cur.execute("""
             INSERT OR IGNORE INTO articles
-            (id, source_site, title, description, author_info, keywords, content_url, published_date, item_type, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, source_site, title, description, full_content, content_hash, author_info, keywords, content_url, published_date, item_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 item["id"],
                 item["source_site"],
                 item["title"],
                 item.get("description", ""),
+                full_content,
+                content_hash,
                 item.get("author_info", ""),
                 item.get("keywords", ""),
                 item["content_url"],
@@ -137,11 +149,42 @@ class DatabaseManager:
             return count
     
     def article_exists(self, article_id: str) -> bool:
-        """Check if article already exists."""
+        """Check if article already exists by ID."""
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM articles WHERE id = ?", (article_id,))
             return cur.fetchone() is not None
+    
+    def article_exists_by_hash(self, content_hash: str) -> bool:
+        """
+        Check if article already exists by content hash.
+        
+        Args:
+            content_hash: SHA256 hash of article content
+            
+        Returns:
+            True if article with same content exists
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM articles WHERE content_hash = ?", (content_hash,))
+            return cur.fetchone() is not None
+    
+    def get_article_by_hash(self, content_hash: str) -> Optional[Dict]:
+        """
+        Get article by content hash.
+        
+        Args:
+            content_hash: SHA256 hash of article content
+            
+        Returns:
+            Article dict if found, None otherwise
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM articles WHERE content_hash = ?", (content_hash,))
+            row = cur.fetchone()
+            return dict(row) if row else None
     
     def save_embedding(self, article_id: str, embedding: bytes, model: str = "default") -> bool:
         """

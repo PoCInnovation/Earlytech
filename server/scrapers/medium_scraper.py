@@ -2,6 +2,8 @@
 
 from typing import List, Dict
 from .base import BaseScraper
+import requests
+from bs4 import BeautifulSoup
 
 try:
     import feedparser
@@ -25,6 +27,21 @@ class MediumScraper(BaseScraper):
         if feedparser is None:
             raise ImportError("feedparser package is required. Install it with: pip install feedparser")
     
+    def _fetch_article_content(self, url: str) -> str:
+        """Fetch full article content from Medium."""
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, 'html.parser')
+                article = soup.find('article')
+                if article:
+                    paragraphs = article.find_all('p')
+                    content = '\n'.join([p.get_text() for p in paragraphs])
+                    return content
+        except Exception:
+            pass
+        return ""
+    
     def _normalize_entry(self, entry: Dict) -> Dict:
         """Normalize RSS entry from Medium."""
         import time
@@ -37,12 +54,17 @@ class MediumScraper(BaseScraper):
             published_date = datetime.fromtimestamp(time.mktime(entry.published_parsed)).isoformat()
         
         keywords = [tag.term for tag in entry.get('tags', [])] if 'tags' in entry else []
+        summary = entry.get('summary', 'N/A')
+        
+        article_content = self._fetch_article_content(entry_id)
+        full_content = article_content if article_content else summary
         
         return self.normalize_item(
             item_id=entry_id,
             source_site=self.source_name,
             title=entry.get('title', 'N/A'),
-            description=entry.get('summary', 'N/A'),
+            description=summary,
+            full_content=full_content,
             author_info=entry.get('author', 'N/A'),
             keywords=", ".join(keywords),
             content_url=entry_id,

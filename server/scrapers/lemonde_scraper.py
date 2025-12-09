@@ -2,6 +2,8 @@
 
 from typing import List, Dict
 from .base import BaseScraper
+import requests
+from bs4 import BeautifulSoup
 
 try:
     import feedparser
@@ -24,6 +26,22 @@ class LeMondeScraper(BaseScraper):
         if feedparser is None:
             raise ImportError("feedparser package is required. Install it with: pip install feedparser")
     
+    def _fetch_article_content(self, url: str) -> str:
+        """Fetch full article content from Le Monde."""
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, 'html.parser')
+                article = soup.find('article')
+                if article:
+                    for script in article(["script", "style"]):
+                        script.decompose()
+                    text = article.get_text(separator='\n', strip=True)
+                    return text
+        except Exception:
+            pass
+        return ""
+    
     def _normalize_entry(self, entry: Dict, feed_url: str) -> Dict:
         """Normalize RSS entry from Le Monde."""
         import time
@@ -45,14 +63,21 @@ class LeMondeScraper(BaseScraper):
         elif "continu" in feed_url:
             category = "continuous"
         
+        summary = getattr(entry, "summary", "")
+        link = getattr(entry, "link", "")
+        
+        article_content = self._fetch_article_content(link)
+        full_content = article_content if article_content else summary
+        
         return self.normalize_item(
             item_id=entry_id,
             source_site=self.source_name,
             title=getattr(entry, "title", ""),
-            description=getattr(entry, "summary", ""),
+            description=summary,
+            full_content=full_content,
             author_info=getattr(entry, "author", "Le Monde"),
             keywords=category,
-            content_url=getattr(entry, "link", ""),
+            content_url=link,
             published_date=published_date,
             item_type="article"
         )
