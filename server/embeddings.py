@@ -4,6 +4,8 @@ import pickle
 from typing import List, Optional
 from abc import ABC, abstractmethod
 import numpy as np
+import os
+from pathlib import Path
 
 
 class EmbeddingProvider(ABC):
@@ -80,6 +82,75 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
     def get_name(self) -> str:
         """Return provider name."""
         return f"sentence-transformers-{self.model_name}"
+
+
+class OpenAIEmbeddingProvider(EmbeddingProvider):
+    """Embedding provider using OpenAI API."""
+    
+    def __init__(self, model: str = "text-embedding-3-small", api_key: Optional[str] = None):
+        """
+        Initialize OpenAI embedding provider.
+        
+        Args:
+            model: OpenAI embedding model to use (text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002)
+            api_key: OpenAI API key (defaults to .env file or OPENAI_API_KEY env var)
+        """
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise ImportError(
+                "openai package is required. Install it with: "
+                "pip install openai"
+            )
+        
+        self.model = model
+        
+        if api_key:
+            self.api_key = api_key
+        else:
+            self.api_key = self._load_api_key_from_env()
+        
+        if not self.api_key:
+            raise ValueError(
+                "OpenAI API key is required. Add OPENAI_API_KEY to .env file "
+                "or set OPENAI_API_KEY environment variable."
+            )
+        
+        self.client = OpenAI(api_key=self.api_key)
+    
+    def _load_api_key_from_env(self) -> Optional[str]:
+        """Load API key from .env file or environment variable."""
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            return api_key
+        
+        env_path = Path(__file__).parent / ".env"
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('OPENAI_API_KEY='):
+                        return line.split('=', 1)[1].strip().strip('"').strip("'")
+        
+        return None
+    
+    def embed(self, text: str) -> np.ndarray:
+        """Generate embedding with OpenAI API."""
+        max_chars = 30000
+        if len(text) > max_chars:
+            text = text[:max_chars]
+        
+        response = self.client.embeddings.create(
+            input=text,
+            model=self.model
+        )
+        
+        embedding = np.array(response.data[0].embedding, dtype=np.float32)
+        return embedding
+    
+    def get_name(self) -> str:
+        """Return provider name."""
+        return f"openai-{self.model}"
 
 
 class EmbeddingManager:

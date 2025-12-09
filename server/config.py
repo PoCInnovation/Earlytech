@@ -23,9 +23,6 @@ class ServerConfig:
     
     watch_interval_seconds: int = 300
     
-    use_dummy_embeddings: bool = True
-    embedding_model: str = "all-MiniLM-L6-v2"
-    
     log_level: str = "INFO"
     
     scrapers: Dict[str, ScraperConfig] = None
@@ -66,13 +63,11 @@ DEFAULT_CONFIG = ServerConfig()
 
 DEV_CONFIG = ServerConfig(
     db_path="veille_technique_dev.db",
-    use_dummy_embeddings=True,
     watch_interval_seconds=60,
 )
 
 PROD_CONFIG = ServerConfig(
     db_path="veille_technique.db",
-    use_dummy_embeddings=False,
     watch_interval_seconds=600,
     log_level="WARNING",
 )

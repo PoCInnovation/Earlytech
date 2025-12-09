@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Quick server tests - Verify all components are functional.
 """

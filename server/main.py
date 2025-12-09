@@ -13,7 +13,7 @@ from datetime import datetime, UTC
 import argparse
 
 from database import DatabaseManager
-from embeddings import EmbeddingManager, DummyEmbeddingProvider
+from embeddings import EmbeddingManager, OpenAIEmbeddingProvider
 from scrapers.arxiv_scraper import ArxivScraper
 from scrapers.github_scraper import GithubScraper
 from scrapers.medium_scraper import MediumScraper
@@ -34,7 +34,6 @@ class WatchServer:
     def __init__(
         self,
         db_path: str = "veille_technique.db",
-        use_dummy_embeddings: bool = True,
         check_interval: int = 300
     ):
         """
@@ -42,16 +41,11 @@ class WatchServer:
         
         Args:
             db_path: Path to the database file
-            use_dummy_embeddings: Use dummy embeddings (dev) or real ones
             check_interval: Scraping interval in seconds (watch mode)
         """
         self.db_manager = DatabaseManager(db_path)
         
-        if use_dummy_embeddings:
-            embedding_provider = DummyEmbeddingProvider()
-        else:
-            embedding_provider = DummyEmbeddingProvider()
-        
+        embedding_provider = OpenAIEmbeddingProvider(model="text-embedding-3-small")
         self.embedding_manager = EmbeddingManager(embedding_provider)
         
         self.check_interval = check_interval
@@ -304,17 +298,11 @@ def main():
         default="veille_export.db",
         help="Output file path for export mode"
     )
-    parser.add_argument(
-        "--no-dummy",
-        action="store_true",
-        help="Do not use dummy embeddings"
-    )
     
     args = parser.parse_args()
     
     server = WatchServer(
         db_path=args.db,
-        use_dummy_embeddings=not args.no_dummy,
         check_interval=args.interval
     )
     

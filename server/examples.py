@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Usage examples for the watch server.
 """
@@ -16,7 +15,6 @@ def example_backfill():
     
     server = WatchServer(
         db_path="test_backfill.db",
-        use_dummy_embeddings=True,
         check_interval=300
     )
     
@@ -34,7 +32,6 @@ def example_watch_limited():
     
     server = WatchServer(
         db_path="test_watch.db",
-        use_dummy_embeddings=True,
         check_interval=10
     )
     
@@ -96,7 +93,6 @@ def example_custom_config():
     custom_config = ServerConfig(
         db_path="test_custom.db",
         watch_interval_seconds=120,
-        use_dummy_embeddings=True,
         scrapers={
             "arxiv": ScraperConfig(enabled=True, limit_latest=10, limit_all=30),
             "github": ScraperConfig(enabled=True, limit_latest=15, limit_all=50),
@@ -109,7 +105,6 @@ def example_custom_config():
     print(f"\n✓ Custom config created")
     print(f"  DB : {custom_config.db_path}")
     print(f"  Interval : {custom_config.watch_interval_seconds}s")
-    print(f"  Dummy embeddings : {custom_config.use_dummy_embeddings}")
     
     print(f"\n✓ Enabled scrapers :")
     for name, cfg in custom_config.scrapers.items():
