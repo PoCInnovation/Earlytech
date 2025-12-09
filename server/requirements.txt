@@ -1,0 +1,4 @@
+feedparser==6.0.10
+requests==2.31.0
+arxiv==1.4.8
+numpy==1.26.4
