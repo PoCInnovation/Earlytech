@@ -2,34 +2,34 @@
 
 ## 📋 Summary of Changes
 
-The server has been completely redesigned with a modular architecture and two clearly defined operating modes.
+The server has been redesigned with a modular architecture and two operating modes.
 
 ## 🏗️ Architecture
 
 ```
 server/
 ├── main.py                 # Main server with WatchServer (orchestrator)
-├── database.py             # SQLite database manager
+├── database.py             # PostgreSQL + pgvector database manager
 ├── embeddings.py           # Embeddings manager (vectors)
-├── config.py              # Centralized configuration
-├── examples.py            # Usage examples
-├── requirements.txt       # Python dependencies
-├── README.md              # Complete documentation
+├── config.py               # Centralized configuration
+├── examples.py             # Usage examples
+├── requirements.txt        # Python dependencies
+├── README.md               # Complete documentation
 └── scrapers/
-    ├── base.py            # Abstract BaseScraper interface
-    ├── arxiv_scraper.py    # Scraper for arXiv
-    ├── github_scraper.py   # Scraper for GitHub
-    ├── medium_scraper.py   # Scraper for Medium
-    ├── lemonde_scraper.py  # Scraper for Le Monde
+    ├── base.py             # Abstract BaseScraper interface
+    ├── arxiv_scraper.py     # Scraper for arXiv
+    ├── github_scraper.py    # Scraper for GitHub
+    ├── medium_scraper.py    # Scraper for Medium
+    ├── lemonde_scraper.py   # Scraper for Le Monde
     └── huggingface_scraper.py # Scraper for Hugging Face
 ```
 
-## 🎯 Two Operating Modes
+## 🎯 Operating Modes
 
 ### 1️⃣ Backfill Mode (History)
-**When:** At server startup
+**When:** At startup (optional)
 
-**What:** Scrapes all available history from each source
+**What:** Scrapes all available history from each source.
 
 **How:**
 ```bash
@@ -37,15 +37,13 @@ python main.py backfill --limit 100
 ```
 
 **Flow:**
-1. Scraper calls `scrape_all()` for each source
-2. Articles are saved to DB (deduplicated by ID)
-3. Embeddings generated and stored for each article
-4. Sync recorded in `sync_history`
+1. Each scraper calls `scrape_all()`.
+2. Articles are saved (deduplicated by ID and hash).
+3. Embeddings are generated and stored.
+4. Sync history is recorded.
 
 ### 2️⃣ Watch Mode (Monitoring)
-**When:** After backfill or directly
-
-**What:** Continuously scrapes new articles
+**When:** Continuous monitoring after (or without) backfill.
 
 **How:**
 ```bash
@@ -53,36 +51,33 @@ python main.py watch --interval 300
 ```
 
 **Flow:**
-1. Infinite loop (by default, checks every 5 min)
-2. Scraper calls `scrape_latest()` for each source
-3. New articles detected (ID comparison)
-4. Save and create embeddings
-5. Wait for next interval
+1. Infinite loop (default 5-minute interval).
+2. Each scraper calls `scrape_latest()`.
+3. New articles are saved; embeddings generated.
+4. Sync history is recorded.
 
 ## 🔧 Main Components
 
 ### BaseScraper (abstract interface)
-All scrapers inherit from this class and implement:
-- `scrape_latest(limit)` → for watch mode
-- `scrape_all(limit)` → for backfill mode
+- `scrape_latest(limit)` → watch mode
+- `scrape_all(limit)` → backfill mode
 - `normalize_item()` → unified format
 
 ### DatabaseManager
-- Manages SQLite persistence
-- Tables: articles, embeddings, sync_history
-- Automatic deduplication (INSERT OR IGNORE)
-- Batch operations for performance
+- PostgreSQL persistence with pgvector
+- Tables: articles, embeddings (vector), sync_history
+- Automatic deduplication via `ON CONFLICT`
+- Vector-ready queries and batch operations
 
 ### EmbeddingManager
-- Support for multiple providers (Dummy, SentenceTransformers)
-- Vector serialization/deserialization
-- Storage as BLOB in DB
+- Providers: Dummy, SentenceTransformers, OpenAI
+- Generates numpy vectors sized to the chosen model
+- Stores vectors directly in pgvector columns (no pickle)
 
 ### WatchServer (orchestrator)
 - Initializes all scrapers
 - Manages both modes
-- Detailed operation logging
-- Statistics and monitoring
+- Logging, statistics, and monitoring
 
 ## 💾 Database Structure
 
@@ -90,31 +85,34 @@ All scrapers inherit from this class and implement:
 ```
 id (TEXT PRIMARY KEY)      # Unique identifier per source
 source_site (TEXT)         # arxiv, github, medium, le_monde, huggingface
-title (TEXT)              # Article title
-description (TEXT)        # Summary/content
-author_info (TEXT)        # Author(s)
-keywords (TEXT)           # Tags/categories
-content_url (TEXT)        # Link to source
-published_date (TEXT)     # Publication date
-item_type (TEXT)          # article, paper, repository, etc.
-created_at (TIMESTAMP)    # When we retrieved it
-updated_at (TIMESTAMP)    # Last update
+title (TEXT)               # Article title
+description (TEXT)         # Summary/content
+author_info (TEXT)         # Author(s)
+keywords (TEXT)            # Tags/categories
+content_url (TEXT)         # Link to source
+published_date (TIMESTAMPTZ) # Publication date
+item_type (TEXT)           # article, paper, repository, etc.
+created_at (TIMESTAMPTZ)   # When retrieved
+updated_at (TIMESTAMPTZ)   # Last update
 ```
 
 ### Table `embeddings`
 ```
-article_id (TEXT UNIQUE)  # Link to articles.id
-embedding (BLOB)          # Serialized vector (pickle)
-embedding_model (TEXT)    # Which model generated the embedding
-created_at (TIMESTAMP)    # When created
+id (SERIAL PRIMARY KEY)         # Unique embedding row
+article_id (TEXT UNIQUE)        # Link to articles.id
+embedding vector(1536)          # pgvector column (dimension tied to embedding model)
+embedding_model (TEXT)          # Which model generated the embedding
+created_at (TIMESTAMPTZ)        # When created
 ```
 
 ### Table `sync_history`
 ```
-source_site (TEXT)        # Which source
-sync_mode (TEXT)          # "watch" or "backfill"
-last_sync_time (TIMESTAMP) # When
-items_processed (INTEGER) # How many articles
+id (SERIAL PRIMARY KEY)         # Unique sync row
+source_site (TEXT)              # Which source
+sync_mode (TEXT)                # "watch" or "backfill"
+last_sync_time (TIMESTAMPTZ)    # When
+items_processed (INTEGER)       # How many articles
+created_at (TIMESTAMPTZ)        # When recorded
 ```
 
 ## 🚀 Usage
@@ -124,7 +122,7 @@ items_processed (INTEGER) # How many articles
 # 1. Fill DB with history
 python main.py backfill --limit 50
 
-# 2. Then monitor continuously
+# 2. Monitor continuously
 python main.py watch --interval 300
 
 # 3. Check stats
@@ -134,13 +132,13 @@ python main.py stats
 ### With options
 ```bash
 # Custom backfill
-python main.py backfill --limit 200 --db custom.db
+python main.py backfill --limit 200 --db-url postgresql://user:pass@localhost:5432/veille_technique
 
-# Watch with 10 min interval
+# Watch with 10-minute interval
 python main.py watch --interval 600
 
 # Stats on specific DB
-python main.py stats --db custom.db
+python main.py stats --db-url postgresql://user:pass@localhost:5432/veille_technique
 ```
 
 ## 📊 Complete Flow Example
@@ -149,104 +147,64 @@ python main.py stats --db custom.db
 Server startup
 │
 ├─→ BACKFILL Mode (optional)
-│   ├─→ ArXiv.scrape_all(100)    → 45 articles → DB
-│   ├─→ GitHub.scrape_all(100)   → 78 articles → DB
-│   ├─→ Medium.scrape_all(100)   → 23 articles → DB
-│   ├─→ LeMonde.scrape_all(100)  → 67 articles → DB
-│   └─→ HF.scrape_all(100)       → 89 articles → DB
+│   ├─→ ArXiv.scrape_all(100)    → … articles → DB
+│   ├─→ GitHub.scrape_all(100)   → … articles → DB
+│   ├─→ Medium.scrape_all(100)   → … articles → DB
+│   ├─→ LeMonde.scrape_all(100)  → … articles → DB
+│   └─→ HF.scrape_all(100)       → … articles → DB
 │       ↓ All articles receive an embedding
-│       → 302 articles in DB with embeddings
 │
 └─→ WATCH Mode (infinite loop)
-    ├─→ Iteration 1
-    │   ├─→ ArXiv.scrape_latest(20)   → 2 new
-    │   ├─→ GitHub.scrape_latest(20)  → 1 new
-    │   ├─→ Medium.scrape_latest(20)  → 0 new
-    │   ├─→ LeMonde.scrape_latest(20) → 1 new
-    │   └─→ HF.scrape_latest(20)      → 2 new
-    │       → 6 new articles added
-    │
-    ├─→ [Wait 5 min]
-    │
-    └─→ Iteration 2
-        └─→ ...
+    ├─→ Iteration 1 …
+    ├─→ [Wait interval]
+    └─→ Iteration 2 …
 ```
 
 ## 🔑 Key Design Points
 
 ### ✓ Modularity
-- Each scraper is independent
-- Easy to add/remove a source
+- Independent scrapers; easy to add/remove
 - Interchangeable embedding providers
 
 ### ✓ Robustness
-- Error handling per scraper
-- No interruption if a source fails
-- Automatic deduplication
+- Error isolation per scraper
+- Deduplication prevents duplicates
 
 ### ✓ Scalability
-- Batch operations for DB
-- Context manager for connections
-- Logging for monitoring
+- Batch DB operations
+- Vector-ready schema
+- Structured logging
 
 ### ✓ Maintainability
-- Clear and documented code
+- Clear code and docs
 - Centralized configuration
-- Usage examples
+- Usage examples included
 
 ## 💻 How to View the Database
 
-### Option 1: Export and View Locally
+Use PostgreSQL tooling (`psql`, `pgcli`, DBeaver, PgAdmin`) with `DATABASE_URL`.
+
 ```bash
-# Export database to local .db file
-python main.py export --db veille_technique.db --output veille_export.db
+# List tables
+psql "$DATABASE_URL" -c "\dt"
 
-# View with SQLite Browser or VSCode extension
-# Export creates a complete copy of the DB
-```
+# Check pgvector extension
+psql "$DATABASE_URL" -c "\dx vector"
 
-### Option 2: Use sqlite3 from Command Line
-```bash
-# Open the database
-sqlite3 veille_technique.db
+# Quick counts
+psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM articles;"
+psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM embeddings;"
 
-# Some useful queries
-sqlite> SELECT COUNT(*) FROM articles;  -- Total articles
-sqlite> SELECT source_site, COUNT(*) FROM articles GROUP BY source_site;  -- By source
-sqlite> SELECT * FROM articles LIMIT 5;  -- View first 5 articles
-sqlite> SELECT source_site, COUNT(*) FROM embeddings GROUP BY source_site;  -- Embeddings per source
-```
+# Example vector query (top 5 nearest)
+psql "$DATABASE_URL" -c "SELECT article_id, embedding <-> '[0.1,0.2,...]' AS distance FROM embeddings ORDER BY embedding <-> '[0.1,0.2,...]' LIMIT 5;"
 
-### Option 3: Use a GUI
-- **SQLite Browser**: `brew install sqlitebrowser` (macOS) or `apt install sqlitebrowser` (Linux)
-- **VSCode Extension**: "SQLite" extension (officially supported)
-- **DBeaver Community**: Free multi-DB application
+# Last syncs
+psql "$DATABASE_URL" -c "SELECT * FROM sync_history ORDER BY created_at DESC LIMIT 5;"
 
-### Example: View Articles from One Source
-```bash
-sqlite3 veille_technique.db << EOF
-.headers on
-.mode column
-SELECT title, author_info, published_date FROM articles 
-WHERE source_site = 'github' 
-ORDER BY published_date DESC 
-LIMIT 10;
-EOF
-```
-
-### Complete DB Structure
-```bash
-# View all tables
-sqlite3 veille_technique.db ".tables"
-
-# View schema of a table
-sqlite3 veille_technique.db ".schema articles"
-
-# View sync stats
-sqlite3 veille_technique.db "SELECT * FROM sync_history ORDER BY created_at DESC LIMIT 5;"
+# Export (custom format)
+pg_dump --dbname="$DATABASE_URL" --format=c --file=veille_technique.dump
 ```
 
 ## 📝 Migration from Old Server
 
-Old code in the `scrap/` folder remains untouched for reference.
-The new server reuses the scraping logic but with a completely restructured architecture.
+Legacy code in `scrap/` remains for reference; the new server reuses scraping logic with the updated architecture.

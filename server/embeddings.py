@@ -1,11 +1,11 @@
 """Embedding management and generation."""
 
-import pickle
-from typing import List, Optional
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import List, Optional
+
 import numpy as np
 import os
-from pathlib import Path
 
 
 class EmbeddingProvider(ABC):
@@ -29,11 +29,15 @@ class EmbeddingProvider(ABC):
         """Return provider name."""
         pass
 
+    def get_dimension(self) -> Optional[int]:
+        """Return embedding dimension when available."""
+        return None
+
 
 class DummyEmbeddingProvider(EmbeddingProvider):
     """Dummy embedding provider for development."""
     
-    def __init__(self, dimension: int = 384):
+    def __init__(self, dimension: int = 1536):
         """
         Initialize dummy provider.
         
@@ -51,6 +55,9 @@ class DummyEmbeddingProvider(EmbeddingProvider):
     def get_name(self) -> str:
         """Return provider name."""
         return "dummy"
+
+    def get_dimension(self) -> Optional[int]:
+        return self.dimension
 
 
 class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
@@ -73,6 +80,7 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
         
         self.model_name = model_name
         self.model = SentenceTransformer(model_name)
+        self.dimension = getattr(self.model, "get_sentence_embedding_dimension", lambda: None)()
     
     def embed(self, text: str) -> np.ndarray:
         """Generate embedding with SentenceTransformer."""
@@ -82,6 +90,9 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
     def get_name(self) -> str:
         """Return provider name."""
         return f"sentence-transformers-{self.model_name}"
+
+    def get_dimension(self) -> Optional[int]:
+        return self.dimension
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
@@ -104,6 +115,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             )
         
         self.model = model
+        self.dimension = self._infer_dimension(model)
         
         if api_key:
             self.api_key = api_key
@@ -152,44 +164,39 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """Return provider name."""
         return f"openai-{self.model}"
 
+    def get_dimension(self) -> Optional[int]:
+        return self.dimension
+
+    def _infer_dimension(self, model: str) -> Optional[int]:
+        return {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+        }.get(model)
+
 
 class EmbeddingManager:
     """Manage embeddings for articles."""
     
-    def __init__(self, provider: Optional[EmbeddingProvider] = None):
-        """
-        Initialize embedding manager.
-        
+    def __init__(self, provider: Optional[EmbeddingProvider] = None, expected_dimension: Optional[int] = None):
+        """Initialize embedding manager.
+
         Args:
             provider: Embedding provider to use (default: Dummy)
+            expected_dimension: Optional enforced dimension (aligns with DB vector size)
         """
         self.provider = provider or DummyEmbeddingProvider()
-    
-    def embed_text(self, text: str) -> bytes:
-        """
-        Generate embedding for text and serialize.
-        
-        Args:
-            text: Text to embed
-            
-        Returns:
-            Serialized embedding in bytes
-        """
+        self.expected_dimension = expected_dimension or self.provider.get_dimension()
+
+    def embed_text(self, text: str) -> np.ndarray:
+        """Generate embedding for text."""
         embedding = self.provider.embed(text)
-        return pickle.dumps(embedding)
-    
-    def embed_article(self, article: dict) -> bytes:
-        """
-        Generate embedding for complete article.
-        
-        Uses full_content if available, otherwise combines title and description.
-        
-        Args:
-            article: Dict with title, description, and optional full_content
-            
-        Returns:
-            Serialized embedding in bytes
-        """
+        embedding = embedding.astype(np.float32)
+        self._validate_dimension(embedding)
+        return embedding
+
+    def embed_article(self, article: dict) -> np.ndarray:
+        """Generate embedding for complete article."""
         full_content = article.get("full_content")
         if full_content:
             text = full_content
@@ -197,21 +204,21 @@ class EmbeddingManager:
             title = article.get("title", "")
             description = article.get("description", "")
             text = f"{title}\n{description}"
-        
+
         return self.embed_text(text)
-    
-    def deserialize_embedding(self, embedding_bytes: bytes) -> np.ndarray:
-        """
-        Deserialize embedding from bytes.
-        
-        Args:
-            embedding_bytes: Embedding in bytes format
-            
-        Returns:
-            Embedding as numpy array
-        """
-        return pickle.loads(embedding_bytes)
-    
+
+    def deserialize_embedding(self, embedding_values: List[float]) -> np.ndarray:
+        """Convert stored vector values back to numpy array."""
+        embedding = np.array(embedding_values, dtype=np.float32)
+        self._validate_dimension(embedding)
+        return embedding
+
     def get_provider_name(self) -> str:
         """Return embedding provider name."""
         return self.provider.get_name()
+
+    def _validate_dimension(self, embedding: np.ndarray):
+        if self.expected_dimension and embedding.shape[0] != self.expected_dimension:
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.expected_dimension}, got {embedding.shape[0]}"
+            )

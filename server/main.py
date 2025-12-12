@@ -6,11 +6,12 @@ Modes:
 2. "backfill": Retrieve entire available history at startup
 """
 
+import argparse
 import asyncio
 import logging
-from typing import Dict, List, Optional
+import os
 from datetime import datetime, UTC
-import argparse
+from typing import Dict, List, Optional
 
 from database import DatabaseManager
 from embeddings import EmbeddingManager, OpenAIEmbeddingProvider
@@ -33,20 +34,26 @@ class WatchServer:
     
     def __init__(
         self,
-        db_path: str = "veille_technique.db",
-        check_interval: int = 300
+        db_url: str,
+        check_interval: int = 300,
+        embedding_model: str = "text-embedding-3-small",
     ):
         """
         Initialize the server.
         
         Args:
-            db_path: Path to the database file
+            db_url: PostgreSQL connection URL
             check_interval: Scraping interval in seconds (watch mode)
+            embedding_model: Embedding model to use (OpenAI)
         """
-        self.db_manager = DatabaseManager(db_path)
-        
-        embedding_provider = OpenAIEmbeddingProvider(model="text-embedding-3-small")
-        self.embedding_manager = EmbeddingManager(embedding_provider)
+        embedding_provider = OpenAIEmbeddingProvider(model=embedding_model)
+        embedding_dim = embedding_provider.get_dimension() or 1536
+
+        self.db_manager = DatabaseManager(db_url, embedding_dimension=embedding_dim)
+        self.embedding_manager = EmbeddingManager(
+            embedding_provider,
+            expected_dimension=embedding_dim,
+        )
         
         self.check_interval = check_interval
         self.running = False
@@ -241,29 +248,13 @@ class WatchServer:
         print("=" * 60)
     
     def export_database(self, output_path: str) -> bool:
-        """
-        Export database to a new file.
-        
-        Args:
-            output_path: Path where to export the database
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        import shutil
-        
-        try:
-            shutil.copy2(self.db_manager.db_path, output_path)
-            logger.info(f"✓ Database exported to {output_path}")
-            
-            import os
-            size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            logger.info(f"  File size: {size_mb:.2f} MB")
-            
-            return True
-        except Exception as e:
-            logger.error(f"✗ Export failed: {e}")
-            return False
+        """Guide export for PostgreSQL deployments."""
+        logger.error("Export is not handled automatically for PostgreSQL. Use pg_dump instead.")
+        logger.info(
+            "Example: pg_dump --dbname=$DATABASE_URL --format=c --file=%s",
+            output_path,
+        )
+        return False
 
 
 def main():
@@ -277,15 +268,20 @@ def main():
         help="Execution mode"
     )
     parser.add_argument(
-        "--db",
-        default="veille_technique.db",
-        help="Path to database"
+        "--db-url",
+        default=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique"),
+        help="PostgreSQL connection URL (or set DATABASE_URL)"
     )
     parser.add_argument(
         "--interval",
         type=int,
         default=300,
         help="Scraping interval in seconds (watch mode)"
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+        help="Embedding model to use (OpenAI)"
     )
     parser.add_argument(
         "--limit",
@@ -302,8 +298,9 @@ def main():
     args = parser.parse_args()
     
     server = WatchServer(
-        db_path=args.db,
-        check_interval=args.interval
+        db_url=args.db_url,
+        check_interval=args.interval,
+        embedding_model=args.embedding_model,
     )
     
     if args.mode == "backfill":
@@ -317,12 +314,10 @@ def main():
         server.print_stats()
     
     elif args.mode == "export":
-        logger.info(f"Exporting database from {args.db} to {args.output}...")
-        if server.export_database(args.output):
-            server.print_stats()
-            logger.info(f"✓ You can now open {args.output} with SQLite Browser or your preferred tool")
-        else:
-            logger.error("Export failed")
+        logger.info(
+            "Export helper: use pg_dump on your PostgreSQL instance. Example: pg_dump --dbname=$DATABASE_URL --file=%s",
+            args.output,
+        )
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ Usage examples for the watch server.
 """
 
 import asyncio
+import os
 from main import WatchServer
 from config import DEV_CONFIG, PROD_CONFIG
 
@@ -14,7 +15,7 @@ def example_backfill():
     print("="*60)
     
     server = WatchServer(
-        db_path="test_backfill.db",
+        db_url=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique"),
         check_interval=300
     )
     
@@ -31,7 +32,7 @@ def example_watch_limited():
     print("="*60)
     
     server = WatchServer(
-        db_path="test_watch.db",
+        db_url=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique"),
         check_interval=10
     )
     
@@ -63,7 +64,7 @@ def example_multi_source_stats():
     print("EXAMPLE 3 : Backfill + Stats")
     print("="*60)
     
-    server = WatchServer(db_path="test_multi.db")
+    server = WatchServer(db_url=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique"))
     
     print("\n📥 Scraping each source...")
     server.run_backfill_mode(limit_per_scraper=5)
@@ -91,7 +92,7 @@ def example_custom_config():
     from config import ServerConfig, ScraperConfig
     
     custom_config = ServerConfig(
-        db_path="test_custom.db",
+        db_url=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique"),
         watch_interval_seconds=120,
         scrapers={
             "arxiv": ScraperConfig(enabled=True, limit_latest=10, limit_all=30),
@@ -103,7 +104,7 @@ def example_custom_config():
     )
     
     print(f"\n✓ Custom config created")
-    print(f"  DB : {custom_config.db_path}")
+    print(f"  DB : {custom_config.db_url}")
     print(f"  Interval : {custom_config.watch_interval_seconds}s")
     
     print(f"\n✓ Enabled scrapers :")

@@ -20,7 +20,7 @@ class LeMondeScraper(BaseScraper):
         self.feeds = [
             "https://www.lemonde.fr/international/rss_full.xml",
             "https://www.lemonde.fr/actualite-medias/rss_full.xml",
-            "https://www.lemonde.fr/en_continu/rss_full.xml"
+            "https://www.lemonde.fr/rss/en_continu.xml"
         ]
         
         if feedparser is None:
