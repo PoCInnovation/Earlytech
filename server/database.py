@@ -97,24 +97,18 @@ class DatabaseManager:
 
             cur.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON articles(content_hash)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_source_site ON articles(source_site)")
-            # Index sur le cluster_id pour le tri
             cur.execute("CREATE INDEX IF NOT EXISTS idx_cluster_id ON articles(cluster_id)")
-
 
     def _compute_content_hash(self, item: Dict) -> str:
         import hashlib
-
         full_content = item.get("full_content", item.get("description", ""))
         return hashlib.sha256(full_content.encode()).hexdigest()
 
     def save_article(self, item: Dict, conn: Optional[psycopg.Connection] = None) -> bool:
-        """Save a single article, returning True if inserted."""
         content_hash = self._compute_content_hash(item)
-
         if conn is None:
             with self.get_connection() as owned_conn:
                 return self.save_article(item, owned_conn)
-
         cur = conn.cursor()
         cur.execute(
             """
@@ -138,47 +132,21 @@ class DatabaseManager:
                 datetime.now(UTC),
             ),
         )
-
         return cur.rowcount > 0
 
-    def save_articles_batch(self, items: List[Dict]) -> int:
-        """Save multiple articles in one transaction."""
-        with self.get_connection() as conn:
-            count = 0
-            for item in items:
-                if self.save_article(item, conn):
-                    count += 1
-            return count
-
     def article_exists(self, article_id: str) -> bool:
-        """Check if article already exists by ID."""
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM articles WHERE id = %s", (article_id,))
             return cur.fetchone() is not None
 
     def article_exists_by_hash(self, content_hash: str) -> bool:
-        """Check if article already exists by content hash."""
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT 1 FROM articles WHERE content_hash = %s", (content_hash,))
             return cur.fetchone() is not None
 
-    def get_article_by_hash(self, content_hash: str) -> Optional[Dict]:
-        """Get article by content hash."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM articles WHERE content_hash = %s", (content_hash,))
-            row = cur.fetchone()
-            return dict(row) if row else None
-
     def save_embedding(self, article_id: str, embedding: np.ndarray, model: str = "default") -> bool:
-        """Save article embedding as a pgvector."""
-        if embedding.ndim != 1 or embedding.shape[0] != self.embedding_dimension:
-            raise ValueError(
-                f"Embedding dimension mismatch: expected {self.embedding_dimension}, got {embedding.shape}"
-            )
-
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -194,194 +162,44 @@ class DatabaseManager:
             )
             return cur.rowcount > 0
 
-    # VOS AJOUTS ICI : MÉTHODE POUR L'EXTRACTION D'ENTITÉS
-    def update_article_entities(
-        self, 
-        article_id: str, 
-        subject: Optional[str], 
-        organization_list: Optional[str], 
-        event_type: Optional[str]
-    ) -> bool:
-        """Update an article with entities extracted by the LLM."""
+    def assign_cluster_by_entities(self, article_id: str, subject: str, orgs: str, event: str):
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
-                UPDATE articles 
-                SET subject = %s,
-                    organization_list = %s::jsonb, -- Casté en jsonb
-                    event_type = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
+                SELECT cluster_id FROM articles 
+                WHERE subject = %s AND organization_list = %s::jsonb AND event_type = %s 
+                AND cluster_id IS NOT NULL LIMIT 1
                 """,
-                (subject, organization_list, event_type, article_id),
-            )
-            return cur.rowcount > 0
-
-    def get_articles_without_embeddings(self, limit: int = 100) -> List[Dict]:
-        """Get articles without embeddings."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT a.* FROM articles a
-                LEFT JOIN embeddings e ON a.id = e.article_id
-                WHERE e.id IS NULL
-                LIMIT %s
-                """,
-                (limit,),
-            )
-            return list(cur.fetchall())
-    
-    def get_all_embeddings_with_ids(self) -> List[Tuple[str, np.ndarray]]:
-        """
-        Retrieve all article IDs and their corresponding embeddings for clustering.
-        Returns a list of (article_id, embedding_array).
-        """
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT article_id, embedding 
-                FROM embeddings
-                ORDER BY article_id 
-                """
-            )
-            return [(row["article_id"], row["embedding"]) for row in cur.fetchall()]
-            
-    def batch_update_cluster_ids(self, updates: List[Tuple[str, int]]) -> int:
-        """
-        Update cluster_id for a list of articles in a single batch transaction.
-        
-        Args:
-            updates: List of (article_id, cluster_id).
-            
-        Returns:
-            Number of rows updated.
-        """
-        if not updates:
-            return 0
-            
-        updated_count = 0
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            
-            cur.execute(
-                """
-                CREATE TEMP TABLE cluster_updates (article_id TEXT, cluster_id INTEGER);
-                """
-            )
-            
-            sql_updates = [(item[0], item[1]) for item in updates]
-            cur.executemany(
-                "INSERT INTO cluster_updates (article_id, cluster_id) VALUES (%s, %s)",
-                sql_updates,
-            )
-
-            cur.execute(
-                """
-                UPDATE articles
-                SET cluster_id = cu.cluster_id,
-                    updated_at = CURRENT_TIMESTAMP
-                FROM cluster_updates cu
-                WHERE articles.id = cu.article_id
-                """
-            )
-            updated_count = cur.rowcount
-            
-            cur.execute("DROP TABLE cluster_updates")
-            
-        return updated_count
-
-
-    def get_articles_by_source(self, source: str, limit: int = 50) -> List[Dict]:
-        """Get articles from a specific source."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT * FROM articles
-                WHERE source_site = %s
-                ORDER BY published_date DESC NULLS LAST
-                LIMIT %s
-                """,
-                (source, limit),
-            )
-            return list(cur.fetchall())
-
-    def get_total_articles(self) -> int:
-        """Return total number of articles."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) AS count FROM articles")
-            row = cur.fetchone()
-            return row["count"] if row else 0
-
-    def get_articles_by_source_count(self) -> Dict[str, int]:
-        """Return number of articles per source."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT source_site, COUNT(*) as count
-                FROM articles
-                GROUP BY source_site
-                ORDER BY count DESC
-                """
-            )
-            return {row["source_site"]: row["count"] for row in cur.fetchall()}
-
-    def record_sync(self, source: str, mode: str, items_processed: int = 0):
-        """Record a synchronization event."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO sync_history
-                (source_site, sync_mode, last_sync_time, items_processed)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (source, mode, datetime.now(UTC), items_processed),
-            )
-
-    def get_last_sync(self, source: str, mode: str) -> Optional[Dict]:
-        """Get last sync for a source and mode."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT * FROM sync_history
-                WHERE source_site = %s AND sync_mode = %s
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (source, mode),
+                (subject, orgs, event)
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            if row:
+                cid = row['cluster_id']
+            else:
+                cur.execute("SELECT COALESCE(MAX(cluster_id), 0) + 1 as next_id FROM articles")
+                cid = cur.fetchone()['next_id']
+            
+            cur.execute(
+                """
+                UPDATE articles SET subject=%s, organization_list=%s::jsonb, 
+                event_type=%s, cluster_id=%s, updated_at=CURRENT_TIMESTAMP 
+                WHERE id=%s
+                """,
+                (subject, orgs, event, cid, article_id)
+            )
 
     def get_stats(self) -> Dict:
-        """Return database statistics."""
         with self.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT COUNT(*) AS count FROM articles")
             total_articles = cur.fetchone()["count"]
-
             cur.execute("SELECT COUNT(*) AS count FROM embeddings")
             total_embeddings = cur.fetchone()["count"]
-            
-            cur.execute("SELECT COUNT(DISTINCT cluster_id) AS count FROM articles WHERE cluster_id IS NOT NULL AND cluster_id != -1")
+            cur.execute("SELECT COUNT(DISTINCT cluster_id) AS count FROM articles WHERE cluster_id IS NOT NULL")
             total_clusters = cur.fetchone()["count"]
-
-            cur.execute(
-                """
-                SELECT source_site, COUNT(*) as count
-                FROM articles
-                GROUP BY source_site
-                """
-            )
+            cur.execute("SELECT source_site, COUNT(*) as count FROM articles GROUP BY source_site")
             articles_by_source = {row["source_site"]: row["count"] for row in cur.fetchall()}
-
             return {
                 "total_articles": total_articles,
                 "total_embeddings": total_embeddings,
@@ -389,3 +207,11 @@ class DatabaseManager:
                 "articles_without_embeddings": total_articles - total_embeddings,
                 "total_clusters": total_clusters,
             }
+
+    def record_sync(self, source: str, mode: str, items_processed: int = 0):
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO sync_history (source_site, sync_mode, last_sync_time, items_processed) VALUES (%s, %s, %s, %s)",
+                (source, mode, datetime.now(UTC), items_processed),
+            )
