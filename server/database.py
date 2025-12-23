@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 import psycopg
@@ -40,7 +40,6 @@ class DatabaseManager:
 
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-            # Création initiale de la table articles
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS articles (
@@ -61,19 +60,16 @@ class DatabaseManager:
                 """
             )
             
-            # VOS AJOUTS : Modification du schéma pour supporter les entités LLM
-            # Ces colonnes sont conservées car elles sont nécessaires pour votre tri strict.
             cur.execute(
                 """
                 ALTER TABLE articles 
                 ADD COLUMN IF NOT EXISTS subject TEXT,
                 ADD COLUMN IF NOT EXISTS organization_list JSONB, 
-                ADD COLUMN IF NOT EXISTS event_type TEXT
+                ADD COLUMN IF NOT EXISTS event_type TEXT,
+                ADD COLUMN IF NOT EXISTS cluster_id INTEGER 
                 """
             )
-            # Suppression de la colonne cluster_id qui n'est plus nécessaire
 
-            # Création de la table embeddings
             cur.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS embeddings (
@@ -86,7 +82,6 @@ class DatabaseManager:
                 """
             )
 
-            # Création de la table sync_history
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sync_history (
@@ -102,7 +97,9 @@ class DatabaseManager:
 
             cur.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON articles(content_hash)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_source_site ON articles(source_site)")
-            # Suppression de l'index idx_cluster_id qui n'est plus nécessaire
+            # Index sur le cluster_id pour le tri
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_cluster_id ON articles(cluster_id)")
+
 
     def _compute_content_hash(self, item: Dict) -> str:
         import hashlib
@@ -197,7 +194,7 @@ class DatabaseManager:
             )
             return cur.rowcount > 0
 
-    # VOS AJOUTS ICI : MÉTHODE POUR L'EXTRACTION D'ENTITÉS (CONSERVÉE)
+    # VOS AJOUTS ICI : MÉTHODE POUR L'EXTRACTION D'ENTITÉS
     def update_article_entities(
         self, 
         article_id: str, 
@@ -212,7 +209,7 @@ class DatabaseManager:
                 """
                 UPDATE articles 
                 SET subject = %s,
-                    organization_list = %s::jsonb, 
+                    organization_list = %s::jsonb, -- Casté en jsonb
                     event_type = %s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
@@ -235,9 +232,67 @@ class DatabaseManager:
                 (limit,),
             )
             return list(cur.fetchall())
+    
+    def get_all_embeddings_with_ids(self) -> List[Tuple[str, np.ndarray]]:
+        """
+        Retrieve all article IDs and their corresponding embeddings for clustering.
+        Returns a list of (article_id, embedding_array).
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT article_id, embedding 
+                FROM embeddings
+                ORDER BY article_id 
+                """
+            )
+            return [(row["article_id"], row["embedding"]) for row in cur.fetchall()]
+            
+    def batch_update_cluster_ids(self, updates: List[Tuple[str, int]]) -> int:
+        """
+        Update cluster_id for a list of articles in a single batch transaction.
+        
+        Args:
+            updates: List of (article_id, cluster_id).
+            
+        Returns:
+            Number of rows updated.
+        """
+        if not updates:
+            return 0
+            
+        updated_count = 0
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            
+            cur.execute(
+                """
+                CREATE TEMP TABLE cluster_updates (article_id TEXT, cluster_id INTEGER);
+                """
+            )
+            
+            sql_updates = [(item[0], item[1]) for item in updates]
+            cur.executemany(
+                "INSERT INTO cluster_updates (article_id, cluster_id) VALUES (%s, %s)",
+                sql_updates,
+            )
 
-    # Suppression de get_all_embeddings_with_ids()
-    # Suppression de batch_update_cluster_ids()
+            cur.execute(
+                """
+                UPDATE articles
+                SET cluster_id = cu.cluster_id,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM cluster_updates cu
+                WHERE articles.id = cu.article_id
+                """
+            )
+            updated_count = cur.rowcount
+            
+            cur.execute("DROP TABLE cluster_updates")
+            
+        return updated_count
+
 
     def get_articles_by_source(self, source: str, limit: int = 50) -> List[Dict]:
         """Get articles from a specific source."""
@@ -315,6 +370,9 @@ class DatabaseManager:
             cur.execute("SELECT COUNT(*) AS count FROM embeddings")
             total_embeddings = cur.fetchone()["count"]
             
+            cur.execute("SELECT COUNT(DISTINCT cluster_id) AS count FROM articles WHERE cluster_id IS NOT NULL AND cluster_id != -1")
+            total_clusters = cur.fetchone()["count"]
+
             cur.execute(
                 """
                 SELECT source_site, COUNT(*) as count
@@ -329,4 +387,5 @@ class DatabaseManager:
                 "total_embeddings": total_embeddings,
                 "articles_by_source": articles_by_source,
                 "articles_without_embeddings": total_articles - total_embeddings,
+                "total_clusters": total_clusters,
             }
