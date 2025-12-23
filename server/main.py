@@ -21,6 +21,8 @@ from scrapers.medium_scraper import MediumScraper
 from scrapers.lemonde_scraper import LeMondeScraper
 from scrapers.huggingface_scraper import HuggingFaceScraper
 
+# VOS AJOUTS ICI
+from entity_llm_processor import EntityLLMProcessor # Gardé
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +39,7 @@ class WatchServer:
         db_url: str,
         check_interval: int = 300,
         embedding_model: str = "text-embedding-3-small",
+        llm_model: str = "gpt-4o-mini", # Argument gardé pour l'entité LLM
     ):
         """
         Initialize the server.
@@ -45,6 +48,7 @@ class WatchServer:
             db_url: PostgreSQL connection URL
             check_interval: Scraping interval in seconds (watch mode)
             embedding_model: Embedding model to use (OpenAI)
+            llm_model: LLM model to use for entity extraction (VOTRE AJOUT)
         """
         embedding_provider = OpenAIEmbeddingProvider(model=embedding_model)
         embedding_dim = embedding_provider.get_dimension() or 1536
@@ -55,6 +59,8 @@ class WatchServer:
             expected_dimension=embedding_dim,
         )
         
+        self.entity_processor = EntityLLMProcessor(model=llm_model)
+
         self.check_interval = check_interval
         self.running = False
         
@@ -98,7 +104,7 @@ class WatchServer:
     
     def _process_articles(self, articles: List[Dict]) -> int:
         """
-        Process articles: save to DB and create embeddings.
+        Process articles: save to DB, create embeddings, and extract entities.
         
         Args:
             articles: List of normalized articles
@@ -133,6 +139,15 @@ class WatchServer:
                     )
                 except Exception as e:
                     logger.error(f"Embedding error for {article['id']}: {e}")
+                
+                try:
+                    self.entity_processor.process(
+                        article=article,
+                        db_manager=self.db_manager
+                    )
+                except Exception as e:
+                    logger.error(f"LLM Entity Extraction error for {article['id']}: {e}")
+
         
         return new_count
     
@@ -284,6 +299,11 @@ def main():
         help="Embedding model to use (OpenAI)"
     )
     parser.add_argument(
+        "--llm-model",
+        default=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        help="LLM model to use for entity extraction"
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=100,
@@ -301,6 +321,7 @@ def main():
         db_url=args.db_url,
         check_interval=args.interval,
         embedding_model=args.embedding_model,
+        llm_model=args.llm_model,
     )
     
     if args.mode == "backfill":
@@ -318,7 +339,6 @@ def main():
             "Export helper: use pg_dump on your PostgreSQL instance. Example: pg_dump --dbname=$DATABASE_URL --file=%s",
             args.output,
         )
-
 
 if __name__ == "__main__":
     main()

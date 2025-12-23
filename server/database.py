@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import numpy as np
 import psycopg
@@ -40,6 +40,7 @@ class DatabaseManager:
 
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
+            # Création initiale de la table articles
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS articles (
@@ -59,7 +60,20 @@ class DatabaseManager:
                 )
                 """
             )
+            
+            # VOS AJOUTS : Modification du schéma pour supporter les entités LLM
+            # Ces colonnes sont conservées car elles sont nécessaires pour votre tri strict.
+            cur.execute(
+                """
+                ALTER TABLE articles 
+                ADD COLUMN IF NOT EXISTS subject TEXT,
+                ADD COLUMN IF NOT EXISTS organization_list JSONB, 
+                ADD COLUMN IF NOT EXISTS event_type TEXT
+                """
+            )
+            # Suppression de la colonne cluster_id qui n'est plus nécessaire
 
+            # Création de la table embeddings
             cur.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS embeddings (
@@ -72,6 +86,7 @@ class DatabaseManager:
                 """
             )
 
+            # Création de la table sync_history
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sync_history (
@@ -87,6 +102,7 @@ class DatabaseManager:
 
             cur.execute("CREATE INDEX IF NOT EXISTS idx_content_hash ON articles(content_hash)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_source_site ON articles(source_site)")
+            # Suppression de l'index idx_cluster_id qui n'est plus nécessaire
 
     def _compute_content_hash(self, item: Dict) -> str:
         import hashlib
@@ -181,6 +197,30 @@ class DatabaseManager:
             )
             return cur.rowcount > 0
 
+    # VOS AJOUTS ICI : MÉTHODE POUR L'EXTRACTION D'ENTITÉS (CONSERVÉE)
+    def update_article_entities(
+        self, 
+        article_id: str, 
+        subject: Optional[str], 
+        organization_list: Optional[str], 
+        event_type: Optional[str]
+    ) -> bool:
+        """Update an article with entities extracted by the LLM."""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE articles 
+                SET subject = %s,
+                    organization_list = %s::jsonb, 
+                    event_type = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (subject, organization_list, event_type, article_id),
+            )
+            return cur.rowcount > 0
+
     def get_articles_without_embeddings(self, limit: int = 100) -> List[Dict]:
         """Get articles without embeddings."""
         with self.get_connection() as conn:
@@ -195,6 +235,9 @@ class DatabaseManager:
                 (limit,),
             )
             return list(cur.fetchall())
+
+    # Suppression de get_all_embeddings_with_ids()
+    # Suppression de batch_update_cluster_ids()
 
     def get_articles_by_source(self, source: str, limit: int = 50) -> List[Dict]:
         """Get articles from a specific source."""
@@ -271,7 +314,7 @@ class DatabaseManager:
 
             cur.execute("SELECT COUNT(*) AS count FROM embeddings")
             total_embeddings = cur.fetchone()["count"]
-
+            
             cur.execute(
                 """
                 SELECT source_site, COUNT(*) as count
