@@ -1,7 +1,7 @@
 import logging
 import json
 from typing import Dict, Any
-from openai import OpenAI, APIError
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -15,19 +15,15 @@ class EntityLLMProcessor:
             "JSON format. Focus on high-level subjects, involved organizations, "
             "and the type of event the article describes."
         )
-        self.entity_schema = {
-            "type": "object",
-            "properties": {
-                "subject": {"type": "string"},
-                "organization_list": {"type": "array", "items": {"type": "string"}},
-                "event_type": {"type": "string"},
-            },
-            "required": ["subject", "organization_list", "event_type"]
-        }
 
     def process(self, article: Dict, db_manager: Any) -> bool:
         article_id = article["id"]
-        content = f"Title: {article.get('title', '')}\nDescription: {article.get('description', '')}\nContent: {article.get('full_content', '')[:500]}..."
+        content = (
+            f"Title: {article.get('title', '')}\n"
+            f"Description: {article.get('description', '')}\n"
+            f"Content: {article.get('full_content', '')[:500]}..."
+        )
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -37,14 +33,17 @@ class EntityLLMProcessor:
                 ],
                 response_format={"type": "json_object"},
             )
+
             data = json.loads(response.choices[0].message.content)
-            db_manager.assign_cluster_by_entities(
-                article_id,
-                subject=data.get("subject"),
-                orgs=json.dumps(data.get("organization_list", [])),
-                event=data.get("event_type")
+
+            db_manager.assign_cluster_with_similarity(
+                article_id=article_id,
+                subject=data.get("subject", ""),
+                orgs=data.get("organization_list", []),
+                event=data.get("event_type", "")
             )
             return True
+
         except Exception as e:
             logger.error(f"Error for {article_id}: {e}")
             return False
