@@ -261,15 +261,6 @@ class WatchServer:
         for source, count in stats['articles_by_source'].items():
             print(f"  - {source}: {count}")
         print("=" * 60)
-    
-    def export_database(self, output_path: str) -> bool:
-        """Guide export for PostgreSQL deployments."""
-        logger.error("Export is not handled automatically for PostgreSQL. Use pg_dump instead.")
-        logger.info(
-            "Example: pg_dump --dbname=$DATABASE_URL --format=c --file=%s",
-            output_path,
-        )
-        return False
 
 
 def main():
@@ -279,7 +270,7 @@ def main():
     )
     parser.add_argument(
         "mode",
-        choices=["watch", "backfill", "stats", "export"],
+        choices=["watch", "backfill", "stats"],
         help="Execution mode"
     )
     parser.add_argument(
@@ -309,11 +300,6 @@ def main():
         default=100,
         help="Max articles per source (backfill mode)"
     )
-    parser.add_argument(
-        "--output",
-        default="veille_export.db",
-        help="Output file path for export mode"
-    )
     
     args = parser.parse_args()
     
@@ -333,12 +319,6 @@ def main():
         
     elif args.mode == "stats":
         server.print_stats()
-    
-    elif args.mode == "export":
-        logger.info(
-            "Export helper: use pg_dump on your PostgreSQL instance. Example: pg_dump --dbname=$DATABASE_URL --file=%s",
-            args.output,
-        )
 
 if __name__ == "__main__":
     main()

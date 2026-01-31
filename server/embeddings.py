@@ -34,67 +34,6 @@ class EmbeddingProvider(ABC):
         return None
 
 
-class DummyEmbeddingProvider(EmbeddingProvider):
-    """Dummy embedding provider for development."""
-    
-    def __init__(self, dimension: int = 1536):
-        """
-        Initialize dummy provider.
-        
-        Args:
-            dimension: Embedding dimension
-        """
-        self.dimension = dimension
-    
-    def embed(self, text: str) -> np.ndarray:
-        """Generate deterministic random embedding from text hash."""
-        seed = abs(hash(text)) % (2**31)
-        np.random.seed(seed)
-        return np.random.randn(self.dimension).astype(np.float32)
-    
-    def get_name(self) -> str:
-        """Return provider name."""
-        return "dummy"
-
-    def get_dimension(self) -> Optional[int]:
-        return self.dimension
-
-
-class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
-    """Embedding provider using sentence-transformers."""
-    
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        """
-        Initialize SentenceTransformers provider.
-        
-        Args:
-            model_name: Model name to use
-        """
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            raise ImportError(
-                "sentence-transformers is required. Install it with: "
-                "pip install sentence-transformers"
-            )
-        
-        self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
-        self.dimension = getattr(self.model, "get_sentence_embedding_dimension", lambda: None)()
-    
-    def embed(self, text: str) -> np.ndarray:
-        """Generate embedding with SentenceTransformer."""
-        embedding = self.model.encode(text, convert_to_numpy=True)
-        return embedding.astype(np.float32)
-    
-    def get_name(self) -> str:
-        """Return provider name."""
-        return f"sentence-transformers-{self.model_name}"
-
-    def get_dimension(self) -> Optional[int]:
-        return self.dimension
-
-
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     """Embedding provider using OpenAI API."""
     
@@ -178,14 +117,14 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 class EmbeddingManager:
     """Manage embeddings for articles."""
     
-    def __init__(self, provider: Optional[EmbeddingProvider] = None, expected_dimension: Optional[int] = None):
+    def __init__(self, provider: EmbeddingProvider, expected_dimension: Optional[int] = None):
         """Initialize embedding manager.
 
         Args:
-            provider: Embedding provider to use (default: Dummy)
+            provider: Embedding provider to use
             expected_dimension: Optional enforced dimension (aligns with DB vector size)
         """
-        self.provider = provider or DummyEmbeddingProvider()
+        self.provider = provider
         self.expected_dimension = expected_dimension or self.provider.get_dimension()
 
     def embed_text(self, text: str) -> np.ndarray:
