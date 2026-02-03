@@ -5,7 +5,6 @@ Usage examples for the watch server.
 import asyncio
 import os
 from main import WatchServer
-from config import DEV_CONFIG, PROD_CONFIG
 
 
 def example_backfill():

@@ -36,37 +36,4 @@ class ServerConfig:
                 "lemonde": ScraperConfig(enabled=True, limit_latest=20, limit_all=100),
                 "huggingface": ScraperConfig(enabled=True, limit_latest=20, limit_all=100),
             }
-    
-    @classmethod
-    def from_file(cls, filepath: str) -> "ServerConfig":
-        """Load configuration from JSON/YAML file."""
-        import json
-        
-        try:
-            with open(filepath, 'r') as f:
-                data = json.load(f)
-            
-            if "scrapers" in data:
-                data["scrapers"] = {
-                    name: ScraperConfig(**cfg)
-                    for name, cfg in data["scrapers"].items()
-                }
-            
-            return cls(**data)
-        except FileNotFoundError:
-            print(f"Config file {filepath} not found, using default config")
-            return cls()
 
-
-DEFAULT_CONFIG = ServerConfig()
-
-DEV_CONFIG = ServerConfig(
-    db_url=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique_dev"),
-    watch_interval_seconds=60,
-)
-
-PROD_CONFIG = ServerConfig(
-    db_url=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/veille_technique"),
-    watch_interval_seconds=600,
-    log_level="WARNING",
-)
