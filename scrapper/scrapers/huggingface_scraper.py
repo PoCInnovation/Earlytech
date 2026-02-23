@@ -23,12 +23,18 @@ class HuggingFaceScraper(BaseScraper):
     def _build_url(self, item: Dict, item_type: str) -> str:
         """Build public URL for item."""
         base = "https://huggingface.co"
-        item_id = item.get("id")
+        item_id = item.get("id") or item.get("modelId") or item.get("name")
         
         if item_type == "model":
-            return f"{base}/{item.get('modelId')}"
-        elif item_type in ("dataset", "space", "collection", "paper"):
             return f"{base}/{item_id}"
+        elif item_type == "dataset":
+            return f"{base}/datasets/{item_id}"
+        elif item_type == "space":
+            return f"{base}/spaces/{item_id}"
+        elif item_type == "collection":
+            return f"{base}/collections/{item_id}"
+        elif item_type == "paper":
+            return f"{base}/papers/{item_id}"
         
         return base
     
@@ -37,8 +43,12 @@ class HuggingFaceScraper(BaseScraper):
         try:
             if item_type == "model":
                 url = f"https://huggingface.co/{item_id}/raw/main/README.md"
+            elif item_type == "dataset":
+                url = f"https://huggingface.co/datasets/{item_id}/raw/main/README.md"
+            elif item_type == "space":
+                url = f"https://huggingface.co/spaces/{item_id}/raw/main/README.md"
             else:
-                url = f"https://huggingface.co/{item_id}/raw/main/README.md"
+                return ""
             
             resp = requests.get(url, timeout=10)
             if resp.status_code == 200:

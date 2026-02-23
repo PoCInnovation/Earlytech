@@ -123,8 +123,8 @@ Category: {paper.primary_category}
             item_type="paper"
         )
     
-    def scrape_latest(self, limit: int = 20) -> List[Dict]:
-        """Scrape latest articles."""
+    def _perform_search(self, limit: int) -> List[Dict]:
+        """Perform search with given limit."""
         try:
             search = arxiv.Search(
                 query=f"cat:{self.category}",
@@ -141,26 +141,13 @@ Category: {paper.primary_category}
             return results
             
         except Exception as e:
-            print(f"[ERROR] ArXiv scrape_latest: {e}")
+            print(f"[ERROR] ArXiv search: {e}")
             return []
+
+    def scrape_latest(self, limit: int = 20) -> List[Dict]:
+        """Scrape latest articles."""
+        return self._perform_search(limit)
     
     def scrape_all(self, limit: int = 100) -> List[Dict]:
         """Scrape all available articles (with limit)."""
-        try:
-            search = arxiv.Search(
-                query=f"cat:{self.category}",
-                max_results=limit,
-                sort_by=arxiv.SortCriterion.SubmittedDate,
-                sort_order=arxiv.SortOrder.Descending
-            )
-            
-            results = []
-            for paper in search.results():
-                results.append(self._normalize_result(paper))
-            
-            self.update_last_check()
-            return results
-            
-        except Exception as e:
-            print(f"[ERROR] ArXiv scrape_all: {e}")
-            return []
+        return self._perform_search(limit)

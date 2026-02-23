@@ -1,1 +1,5 @@
 .env
+target/
+*.lock
+.venv/
+__pycache__/
