@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 
 from database import DatabaseManager
 from embeddings import EmbeddingManager, OpenAIEmbeddingProvider
+from keyword_matcher import KeywordMatcher
 from scrapers.arxiv_scraper import ArxivScraper
 from scrapers.github_scraper import GithubScraper
 from scrapers.medium_scraper import MediumScraper
@@ -60,6 +61,12 @@ class WatchServer:
         )
         
         self.entity_processor = EntityLLMProcessor(model=llm_model)
+        
+        self.keyword_matcher = KeywordMatcher(
+            db_manager=self.db_manager,
+            embedding_manager=self.embedding_manager,
+            similarity_threshold=0.7
+        )
 
         self.check_interval = check_interval
         self.running = False
@@ -147,6 +154,13 @@ class WatchServer:
                     )
                 except Exception as e:
                     logger.error(f"LLM Entity Extraction error for {article['id']}: {e}")
+                
+                try:
+                    delivery_summary = self.keyword_matcher.dispatch_article_to_users(article["id"])
+                    if delivery_summary:
+                        logger.info(f"Article {article['id']} matched to {len(delivery_summary)} user(s)")
+                except Exception as e:
+                    logger.error(f"Keyword matching error for {article['id']}: {e}")
 
         
         return new_count
