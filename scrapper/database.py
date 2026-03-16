@@ -87,6 +87,62 @@ class DatabaseManager:
 
             cur.execute("CREATE INDEX IF NOT EXISTS idx_cluster_id ON articles(cluster_id)")
 
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    email TEXT UNIQUE,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_keywords (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    keyword TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, keyword)
+                )
+                """
+            )
+
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS user_keyword_embeddings (
+                    id SERIAL PRIMARY KEY,
+                    keyword_id INTEGER NOT NULL UNIQUE REFERENCES user_keywords(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    keyword TEXT NOT NULL,
+                    embedding vector({self.embedding_dimension}) NOT NULL,
+                    embedding_model TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_article_delivery (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                    keyword_id INTEGER REFERENCES user_keywords(id) ON DELETE SET NULL,
+                    similarity_score FLOAT NOT NULL,
+                    delivered_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, article_id)
+                )
+                """
+            )
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_user_keywords ON user_keywords(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_keyword_embeddings ON user_keyword_embeddings(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_user_article_delivery ON user_article_delivery(user_id)")
+
     def assign_cluster_with_similarity(
         self,
         article_id: str,
@@ -229,4 +285,229 @@ class DatabaseManager:
                     article_id,
                 ),
             )
+
+    # USER AND KEYWORD FILTERING METHODS :
+
+    def add_user(self, username: str, email: Optional[str] = None) -> int:
+        """
+        Add a new user to the system.
+        
+        Args:
+            username: Unique username
+            email: Optional email address
+            
+        Returns:
+            User ID
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO users (username, email)
+                VALUES (%s, %s)
+                ON CONFLICT (username) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+                """,
+                (username, email),
+            )
+            user_id = cur.fetchone()["id"]
+            return user_id
+
+    def add_user_keyword(self, user_id: int, keyword: str) -> int:
+        """
+        Add a keyword for a user (without embedding yet).
+        
+        Args:
+            user_id: User ID
+            keyword: Keyword text
+            
+        Returns:
+            Keyword ID
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO user_keywords (user_id, keyword)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id, keyword) DO UPDATE SET created_at = CURRENT_TIMESTAMP
+                RETURNING id
+                """,
+                (user_id, keyword),
+            )
+            keyword_id = cur.fetchone()["id"]
+            return keyword_id
+
+    def store_keyword_embedding(
+        self, 
+        keyword_id: int, 
+        user_id: int,
+        keyword: str,
+        embedding: np.ndarray, 
+        embedding_model: str = "text-embedding-3-small"
+    ) -> None:
+        """
+        Store embedding for a user keyword.
+        
+        Args:
+            keyword_id: Keyword ID
+            user_id: User ID
+            keyword: Keyword text
+            embedding: Numpy embedding vector
+            embedding_model: Model used for embedding
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                INSERT INTO user_keyword_embeddings (keyword_id, user_id, keyword, embedding, embedding_model)
+                VALUES (%s, %s, %s, %s::vector, %s)
+                ON CONFLICT (keyword_id) DO UPDATE 
+                SET embedding = EXCLUDED.embedding, embedding_model = EXCLUDED.embedding_model
+                """,
+                (keyword_id, user_id, keyword, embedding.tobytes(), embedding_model),
+            )
+
+    def find_matching_keywords(self, article_id: str, similarity_threshold: float = 0.7) -> List[Dict[str, Any]]:
+        """
+        Find all user keywords matching an article using embedding similarity.
+        
+        Args:
+            article_id: Article ID to match
+            similarity_threshold: Minimum similarity score (0-1)
+            
+        Returns:
+            List of matching keywords with user info and similarity scores
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT 
+                    u.id as user_id,
+                    u.username,
+                    u.email,
+                    uk.id as keyword_id,
+                    uk.keyword,
+                    1 - (uke.embedding <=> e.embedding) AS similarity_score
+                FROM users u
+                JOIN user_keywords uk ON u.id = uk.user_id
+                JOIN user_keyword_embeddings uke ON uk.id = uke.keyword_id
+                JOIN embeddings e ON e.article_id = %s
+                WHERE (1 - (uke.embedding <=> e.embedding)) >= %s
+                ORDER BY similarity_score DESC
+                """,
+                (article_id, similarity_threshold),
+            )
+            results = cur.fetchall()
+            return results if results else []
+
+    def record_article_delivery(
+        self, 
+        user_id: int, 
+        article_id: str, 
+        keyword_id: int,
+        similarity_score: float
+    ) -> None:
+        """
+        Record that an article was delivered to a user due to a matching keyword.
+        
+        Args:
+            user_id: User ID
+            article_id: Article ID
+            keyword_id: Keyword ID that matched
+            similarity_score: Embedding similarity score
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO user_article_delivery (user_id, article_id, keyword_id, similarity_score)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id, article_id) DO UPDATE 
+                SET delivered_at = CURRENT_TIMESTAMP, similarity_score = EXCLUDED.similarity_score
+                """,
+                (user_id, article_id, keyword_id, similarity_score),
+            )
+
+    def get_user_articles(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get all articles delivered to a user, sorted by delivery date.
+        
+        Args:
+            user_id: User ID
+            limit: Maximum number of articles to return
+            
+        Returns:
+            List of articles with delivery info
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT 
+                    a.id,
+                    a.title,
+                    a.description,
+                    a.source_site,
+                    a.content_url,
+                    a.published_date,
+                    uk.keyword,
+                    uad.similarity_score,
+                    uad.delivered_at
+                FROM user_article_delivery uad
+                JOIN articles a ON uad.article_id = a.id
+                JOIN user_keywords uk ON uad.keyword_id = uk.id
+                WHERE uad.user_id = %s
+                ORDER BY uad.delivered_at DESC
+                LIMIT %s
+                """,
+                (user_id, limit),
+            )
+            results = cur.fetchall()
+            return results if results else []
+
+    def get_user_stats(self, user_id: int) -> Dict[str, Any]:
+        """
+        Get statistics for a user (keywords count, articles delivered).
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            Stats dictionary
+        """
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            
+            # Get user info
+            cur.execute("SELECT username, email FROM users WHERE id = %s", (user_id,))
+            user = cur.fetchone()
+            
+            if not user:
+                return {}
+            
+            # Get keyword count
+            cur.execute("SELECT COUNT(*) as count FROM user_keywords WHERE user_id = %s", (user_id,))
+            keywords_count = cur.fetchone()["count"]
+            
+            # Get article delivery count
+            cur.execute("SELECT COUNT(*) as count FROM user_article_delivery WHERE user_id = %s", (user_id,))
+            articles_count = cur.fetchone()["count"]
+            
+            # Get average similarity score
+            cur.execute(
+                "SELECT AVG(similarity_score) as avg_score FROM user_article_delivery WHERE user_id = %s",
+                (user_id,)
+            )
+            avg_score = cur.fetchone()["avg_score"] or 0.0
+            
+            return {
+                "user_id": user_id,
+                "username": user["username"],
+                "email": user["email"],
+                "keywords_count": keywords_count,
+                "articles_delivered": articles_count,
+                "average_similarity": round(float(avg_score), 3),
+            }
 

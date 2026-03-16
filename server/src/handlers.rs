@@ -159,3 +159,175 @@ pub async fn add_user_keyword(
         None => Err(AppError::KeywordAlreadyExists),
     }
 }
+
+pub async fn delete_user_keyword(
+    Path((user_id, keyword_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = sqlx::query(
+        "DELETE FROM user_keywords WHERE id = $1 AND user_id = $2",
+    )
+    .bind(keyword_id)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::InvalidKeyword);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn get_user_feed(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<UserFeedResponse>, AppError> {
+    let articles = sqlx::query_as::<_, ArticleWithDelivery>(
+        r#"
+        SELECT 
+            a.id, a.title, a.url, a.source, a.summary, a.published_date,
+            uk.keyword as matched_keyword,
+            uad.similarity_score,
+            uad.delivered_at
+        FROM user_article_delivery uad
+        JOIN articles a ON uad.article_id = a.id
+        JOIN user_keywords uk ON uad.keyword_id = uk.id
+        WHERE uad.user_id = $1
+        ORDER BY uad.delivered_at DESC
+        LIMIT 50
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_article_delivery WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0);
+
+    Ok(Json(UserFeedResponse {
+        user_id,
+        total_articles: total,
+        articles,
+    }))
+}
+
+pub async fn list_articles(
+    State(state): State<AppState>,
+) -> Result<Json<ArticleListResponse>, AppError> {
+    let articles = sqlx::query_as::<_, Article>(
+        "SELECT id, title, url, source, content, summary, authors, published_date, scraped_at \n         FROM articles \n         ORDER BY scraped_at DESC \n         LIMIT 50",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM articles")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(0);
+
+    Ok(Json(ArticleListResponse {
+        total,
+        page: 1,
+        per_page: 50,
+        articles,
+    }))
+}
+
+pub async fn get_article(
+    Path(article_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Article>, AppError> {
+    let article = sqlx::query_as::<_, Article>(
+        "SELECT id, title, url, source, content, summary, authors, published_date, scraped_at \n         FROM articles \n         WHERE id = $1",
+    )
+    .bind(&article_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    article
+        .map(Json)
+        .ok_or(AppError::InternalServerError)
+}
+
+pub async fn get_user_stats(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<UserStats>, AppError> {
+    let stats = sqlx::query_as::<_, UserStats>(
+        r#"
+        SELECT 
+            $1::uuid as user_id,
+            COUNT(DISTINCT uad.article_id) as total_articles,
+            COUNT(DISTINCT uad.keyword_id) as total_keywords,
+            AVG(uad.similarity_score) as avg_similarity,
+            MAX(uad.delivered_at) as last_delivery
+        FROM user_article_delivery uad
+        WHERE uad.user_id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(Json(stats))
+}
+
+pub async fn get_delivery_stats(
+    State(state): State<AppState>,
+) -> Result<Json<DeliveryStats>, AppError> {
+    let stats = sqlx::query_as::<_, DeliveryStats>(
+        r#"
+        SELECT 
+            COUNT(*) as total_deliveries,
+            COUNT(DISTINCT user_id) as total_users,
+            COUNT(DISTINCT keyword_id) as total_keywords,
+            AVG(similarity_score) as avg_similarity
+        FROM user_article_delivery
+        "#,
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(Json(stats))
+}
+
+pub async fn get_recent_deliveries(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<RecentDelivery>>, AppError> {
+    let deliveries = sqlx::query_as::<_, RecentDelivery>(
+        r#"
+        SELECT 
+            uad.id,
+            uad.user_id,
+            u.name as user_name,
+            uad.article_id,
+            a.title as article_title,
+            uk.keyword,
+            uad.similarity_score,
+            uad.delivered_at
+        FROM user_article_delivery uad
+        JOIN users u ON uad.user_id = u.id
+        JOIN articles a ON uad.article_id = a.id
+        JOIN user_keywords uk ON uad.keyword_id = uk.id
+        ORDER BY uad.delivered_at DESC
+        LIMIT 20
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(Json(deliveries))
+}

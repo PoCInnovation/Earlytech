@@ -13,11 +13,11 @@ async fn main() {
 
     let pool = db::establish_connection().await;
     
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    // Run migrations (commented out - tables managed by Python scraper)
+    // sqlx::migrate!("./migrations")
+    //     .run(&pool)
+    //     .await
+    //     .expect("Failed to run migrations");
 
     let state = AppState { pool };
 
