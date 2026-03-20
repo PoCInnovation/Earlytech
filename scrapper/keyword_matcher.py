@@ -145,7 +145,7 @@ class KeywordMatcher:
                 delivery_summary[user_id].append(match["keyword"])
                 
                 logger.info(
-                    f"✓ Article {article_id} delivered to user {user_id} ({match['username']}) "
+                    f"✓ Article {article_id} delivered to user {user_id} ({match['name']}) "
                     f"via keyword '{match['keyword']}' (similarity: {match['similarity_score']:.3f})"
                 )
                 
@@ -197,7 +197,7 @@ class KeywordMatcher:
             user_id = match["user_id"]
             if user_id not in user_matches:
                 user_matches[user_id] = {
-                    "username": match["username"],
+                    "name": match["name"],
                     "keywords": []
                 }
             user_matches[user_id]["keywords"].append({
