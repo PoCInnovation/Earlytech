@@ -264,16 +264,13 @@ class WatchServer:
     def print_stats(self):
         """Display database statistics."""
         stats = self.get_stats()
-        
+
         print("\n" + "=" * 60)
-        print("📊 DATABASE STATISTICS")
+        print("DATABASE STATISTICS")
         print("=" * 60)
         print(f"Total articles: {stats['total_articles']}")
-        print(f"Articles with embedding: {stats['total_embeddings']}")
         print(f"Articles without embedding: {stats['articles_without_embeddings']}")
-        print("\nArticles per source:")
-        for source, count in stats['articles_by_source'].items():
-            print(f"  - {source}: {count}")
+        print(f"Total users: {stats['total_users']}")
         print("=" * 60)
 
 
