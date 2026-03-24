@@ -27,6 +27,7 @@ export interface ArticleWithDelivery {
   matched_keyword: string;
   similarity_score: number;
   delivered_at: string;
+  feedback?: "relevant" | "not_relevant" | null;
 }
 
 export interface FeedResponse {
@@ -81,6 +82,48 @@ export interface UserStats {
   total_keywords: number;
   avg_similarity: number;
   last_delivery: string | null;
+}
+
+export interface UserPreferences {
+  user_id: string;
+  digest_enabled: boolean;
+  digest_frequency: "daily" | "weekly";
+  digest_hour_utc: number;
+  updated_at: string;
+}
+
+export interface UpdateUserPreferencesRequest {
+  digest_enabled: boolean;
+  digest_frequency: "daily" | "weekly";
+  digest_hour_utc: number;
+}
+
+export interface UserExcludedKeyword {
+  id: string;
+  user_id: string;
+  keyword: string;
+  created_at: string;
+}
+
+export interface UserExclusionResponse {
+  sources: string[];
+  keywords: UserExcludedKeyword[];
+}
+
+export interface UserFeedbackRequest {
+  article_id: string;
+  feedback: "relevant" | "not_relevant";
+}
+
+export interface UserQualityStats {
+  user_id: string;
+  total_delivered: number;
+  total_feedback: number;
+  relevant_count: number;
+  not_relevant_count: number;
+  relevance_rate: number;
+  feedback_coverage_rate: number;
+  avg_similarity: number;
 }
 
 export type SourceType = "arxiv" | "github" | "medium" | "le_monde" | "huggingface";

@@ -1,15 +1,26 @@
 import { getSession } from "@/lib/auth";
 import { api } from "@/lib/api-client";
+import { DigestPreferencesForm } from "@/components/features/digest-preferences-form";
+import { ExclusionsManager } from "@/components/features/exclusions-manager";
 import { KeywordManager } from "@/components/features/keyword-manager";
-import type { UserKeyword } from "@/types";
+import type { UserExclusionResponse, UserKeyword, UserPreferences } from "@/types";
 
 export default async function SettingsPage() {
   const session = await getSession();
   if (!session) return null;
 
   let keywords: UserKeyword[] = [];
+  let preferences: UserPreferences | null = null;
+  let exclusions: UserExclusionResponse = { sources: [], keywords: [] };
   try {
-    keywords = await api.getUserKeywords(session.userId);
+    const [kw, prefs, ex] = await Promise.all([
+      api.getUserKeywords(session.userId),
+      api.getUserPreferences(session.userId),
+      api.getUserExclusions(session.userId),
+    ]);
+    keywords = kw;
+    preferences = prefs;
+    exclusions = ex;
   } catch {
     keywords = [];
   }
@@ -26,6 +37,13 @@ export default async function SettingsPage() {
       </div>
 
       <KeywordManager initialKeywords={keywords} />
+
+      {preferences && <DigestPreferencesForm preferences={preferences} />}
+
+      <ExclusionsManager
+        excludedSources={exclusions.sources}
+        excludedKeywords={exclusions.keywords}
+      />
     </div>
   );
 }

@@ -260,10 +260,22 @@ cargo test
 | GET | `/users/:id/keywords` | Liste des keywords |
 | POST | `/users/:id/keywords` | Ajouter un keyword |
 | DELETE | `/users/:user_id/keywords/:keyword_id` | Supprimer un keyword |
+| **Preferences** |||
+| GET | `/users/:id/preferences` | Récupérer les préférences digest |
+| POST | `/users/:id/preferences` | Mettre à jour les préférences digest |
+| **Exclusions** |||
+| GET | `/users/:id/exclusions` | Liste des exclusions (sources + keywords) |
+| POST | `/users/:id/exclusions/sources` | Exclure une source |
+| DELETE | `/users/:user_id/exclusions/sources/:source` | Retirer une source exclue |
+| POST | `/users/:id/exclusions/keywords` | Exclure un keyword |
+| DELETE | `/users/:user_id/exclusions/keywords/:keyword_id` | Retirer un keyword exclu |
 | **Feed** |||
 | GET | `/users/:id/feed` | Feed personnalisé |
+| **Feedback** |||
+| POST | `/users/:id/feedback` | Enregistrer le feedback (relevant / not_relevant) |
 | **Stats** |||
 | GET | `/users/:id/stats` | Stats utilisateur |
+| GET | `/users/:id/quality` | Dashboard qualité des recommandations |
 | GET | `/delivery/stats` | Stats globales |
 | GET | `/delivery/recent` | Deliveries récentes |
 

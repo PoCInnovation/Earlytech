@@ -8,6 +8,12 @@ import type {
   UserKeyword,
   FeedResponse,
   UserStats,
+  UserPreferences,
+  UpdateUserPreferencesRequest,
+  UserExclusionResponse,
+  UserExcludedKeyword,
+  UserFeedbackRequest,
+  UserQualityStats,
 } from "@/types";
 
 export class ApiError extends Error {
@@ -88,4 +94,47 @@ export const api = {
 
   getUserStats: (userId: string) =>
     request<UserStats>(`/users/${userId}/stats`),
+
+  getUserPreferences: (userId: string) =>
+    request<UserPreferences>(`/users/${userId}/preferences`),
+
+  updateUserPreferences: (userId: string, data: UpdateUserPreferencesRequest) =>
+    request<UserPreferences>(`/users/${userId}/preferences`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getUserExclusions: (userId: string) =>
+    request<UserExclusionResponse>(`/users/${userId}/exclusions`),
+
+  addExcludedSource: (userId: string, source: string) =>
+    request<void>(`/users/${userId}/exclusions/sources`, {
+      method: "POST",
+      body: JSON.stringify({ source }),
+    }),
+
+  deleteExcludedSource: (userId: string, source: string) =>
+    request<void>(`/users/${userId}/exclusions/sources/${encodeURIComponent(source)}`, {
+      method: "DELETE",
+    }),
+
+  addExcludedKeyword: (userId: string, keyword: string) =>
+    request<UserExcludedKeyword>(`/users/${userId}/exclusions/keywords`, {
+      method: "POST",
+      body: JSON.stringify({ keyword }),
+    }),
+
+  deleteExcludedKeyword: (userId: string, keywordId: string) =>
+    request<void>(`/users/${userId}/exclusions/keywords/${keywordId}`, {
+      method: "DELETE",
+    }),
+
+  submitFeedback: (userId: string, data: UserFeedbackRequest) =>
+    request<void>(`/users/${userId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getUserQualityStats: (userId: string) =>
+    request<UserQualityStats>(`/users/${userId}/quality`),
 };

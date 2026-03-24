@@ -82,6 +82,7 @@ pub struct ArticleWithDelivery {
     pub matched_keyword: String,
     pub similarity_score: f64,
     pub delivered_at: DateTime<Utc>,
+    pub feedback: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -126,4 +127,62 @@ pub struct RecentDelivery {
     pub keyword: String,
     pub similarity_score: f64,
     pub delivered_at: DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow, Serialize)]
+pub struct UserPreferences {
+    pub user_id: Uuid,
+    pub digest_enabled: bool,
+    pub digest_frequency: String,
+    pub digest_hour_utc: i16,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserPreferencesSchema {
+    pub digest_enabled: bool,
+    pub digest_frequency: String,
+    pub digest_hour_utc: i16,
+}
+
+#[derive(Debug, FromRow, Serialize)]
+pub struct UserExcludedKeyword {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub keyword: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserExclusionResponse {
+    pub sources: Vec<String>,
+    pub keywords: Vec<UserExcludedKeyword>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateExcludedSourceSchema {
+    pub source: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateExcludedKeywordSchema {
+    pub keyword: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserFeedbackSchema {
+    pub article_id: String,
+    pub feedback: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserQualityStats {
+    pub user_id: Uuid,
+    pub total_delivered: i64,
+    pub total_feedback: i64,
+    pub relevant_count: i64,
+    pub not_relevant_count: i64,
+    pub relevance_rate: f64,
+    pub feedback_coverage_rate: f64,
+    pub avg_similarity: f64,
 }

@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/auth";
-import { getUserFeed, getUserStats } from "@/actions/articles";
+import { getUserFeed, getUserQualityStats, getUserStats } from "@/actions/articles";
 import { ArticleCardFeed } from "@/components/features/article-card-feed";
+import { QualityDashboard } from "@/components/features/quality-dashboard";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatPercentage } from "@/lib/utils";
 
@@ -8,9 +9,10 @@ export default async function FeedPage() {
   const session = await getSession();
   if (!session) return null;
 
-  const [feed, stats] = await Promise.all([
+  const [feed, stats, quality] = await Promise.all([
     getUserFeed(session.userId),
     getUserStats(session.userId),
+    getUserQualityStats(session.userId),
   ]);
 
   const articles = feed?.articles ?? [];
@@ -44,6 +46,8 @@ export default async function FeedPage() {
           </p>
         )}
       </div>
+
+      {quality && <QualityDashboard quality={quality} />}
 
       {articles.length === 0 ? (
         <EmptyState message="No articles match your interests yet. The scraper runs continuously, check back soon!" />

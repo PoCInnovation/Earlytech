@@ -24,19 +24,25 @@ pub enum AppError {
     InvalidCredentials,
     KeywordAlreadyExists,
     InvalidKeyword,
+    InvalidInput(String),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
-            AppError::InternalServerError => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-            AppError::UserAlreadyExists => (StatusCode::CONFLICT, "User with that email already exists"),
-            AppError::InvalidCredentials => (StatusCode::UNAUTHORIZED, "Invalid email or password"),
-            AppError::KeywordAlreadyExists => (StatusCode::CONFLICT, "Keyword already exists for this user"),
-            AppError::InvalidKeyword => (StatusCode::BAD_REQUEST, "Keyword must not be empty"),
+        let (status, message): (StatusCode, String) = match self {
+            AppError::InternalServerError => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string()),
+            AppError::UserAlreadyExists => (StatusCode::CONFLICT, "User with that email already exists".to_string()),
+            AppError::InvalidCredentials => (StatusCode::UNAUTHORIZED, "Invalid email or password".to_string()),
+            AppError::KeywordAlreadyExists => (StatusCode::CONFLICT, "Keyword already exists for this user".to_string()),
+            AppError::InvalidKeyword => (StatusCode::BAD_REQUEST, "Keyword must not be empty".to_string()),
+            AppError::InvalidInput(message) => (StatusCode::BAD_REQUEST, message),
         };
         (status, Json(json!({"error": message}))).into_response()
     }
+}
+
+fn is_valid_source(source: &str) -> bool {
+    matches!(source, "arxiv" | "github" | "medium" | "le_monde" | "huggingface")
 }
 
 pub async fn get_article_count(State(state): State<AppState>) -> Json<ArticleCount> {
@@ -190,11 +196,23 @@ pub async fn get_user_feed(
             a.id, a.title, a.url, a.source, a.summary, a.published_date,
             uk.keyword as matched_keyword,
             uad.similarity_score,
-            uad.delivered_at
+            uad.delivered_at,
+            uaf.feedback
         FROM user_article_delivery uad
         JOIN articles a ON uad.article_id = a.id
         JOIN user_keywords uk ON uad.keyword_id = uk.id
+        LEFT JOIN user_article_feedback uaf ON uaf.user_id = uad.user_id AND uaf.article_id = uad.article_id
         WHERE uad.user_id = $1
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_excluded_sources ues
+              WHERE ues.user_id = uad.user_id AND ues.source = a.source
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_excluded_keywords uek
+              WHERE uek.user_id = uad.user_id AND uek.keyword = uk.keyword
+          )
         ORDER BY uad.delivered_at DESC
         LIMIT 50
         "#,
@@ -330,4 +348,327 @@ pub async fn get_recent_deliveries(
     .map_err(|_| AppError::InternalServerError)?;
 
     Ok(Json(deliveries))
+}
+
+pub async fn get_user_preferences(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<UserPreferences>, AppError> {
+    sqlx::query(
+        r#"
+        INSERT INTO user_preferences (user_id)
+        VALUES ($1)
+        ON CONFLICT (user_id) DO NOTHING
+        "#,
+    )
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    let prefs = sqlx::query_as::<_, UserPreferences>(
+        r#"
+        SELECT user_id, digest_enabled, digest_frequency, digest_hour_utc, updated_at
+        FROM user_preferences
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(Json(prefs))
+}
+
+pub async fn update_user_preferences(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateUserPreferencesSchema>,
+) -> Result<Json<UserPreferences>, AppError> {
+    if body.digest_hour_utc < 0 || body.digest_hour_utc > 23 {
+        return Err(AppError::InvalidInput("digest_hour_utc must be between 0 and 23".to_string()));
+    }
+    if body.digest_frequency != "daily" && body.digest_frequency != "weekly" {
+        return Err(AppError::InvalidInput("digest_frequency must be daily or weekly".to_string()));
+    }
+
+    let prefs = sqlx::query_as::<_, UserPreferences>(
+        r#"
+        INSERT INTO user_preferences (user_id, digest_enabled, digest_frequency, digest_hour_utc)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+            digest_enabled = EXCLUDED.digest_enabled,
+            digest_frequency = EXCLUDED.digest_frequency,
+            digest_hour_utc = EXCLUDED.digest_hour_utc,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING user_id, digest_enabled, digest_frequency, digest_hour_utc, updated_at
+        "#,
+    )
+    .bind(user_id)
+    .bind(body.digest_enabled)
+    .bind(body.digest_frequency)
+    .bind(body.digest_hour_utc)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(Json(prefs))
+}
+
+pub async fn get_user_exclusions(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<UserExclusionResponse>, AppError> {
+    let sources = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT source
+        FROM user_excluded_sources
+        WHERE user_id = $1
+        ORDER BY source ASC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    let keywords = sqlx::query_as::<_, UserExcludedKeyword>(
+        r#"
+        SELECT id, user_id, keyword, created_at
+        FROM user_excluded_keywords
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(Json(UserExclusionResponse { sources, keywords }))
+}
+
+pub async fn add_excluded_source(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateExcludedSourceSchema>,
+) -> Result<impl IntoResponse, AppError> {
+    let source = body.source.trim().to_lowercase();
+    if !is_valid_source(&source) {
+        return Err(AppError::InvalidInput(
+            "source must be one of: arxiv, github, medium, le_monde, huggingface".to_string(),
+        ));
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_excluded_sources (user_id, source)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, source) DO NOTHING
+        "#,
+    )
+    .bind(user_id)
+    .bind(source)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn delete_excluded_source(
+    Path((user_id, source)): Path<(Uuid, String)>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let normalized = source.trim().to_lowercase();
+    let result = sqlx::query(
+        r#"
+        DELETE FROM user_excluded_sources
+        WHERE user_id = $1 AND source = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(normalized)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::InvalidInput("excluded source not found".to_string()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn add_excluded_keyword(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<UpdateExcludedKeywordSchema>,
+) -> Result<impl IntoResponse, AppError> {
+    let keyword = body.keyword.trim().to_lowercase();
+    if keyword.is_empty() {
+        return Err(AppError::InvalidInput("keyword must not be empty".to_string()));
+    }
+
+    let inserted = sqlx::query_as::<_, UserExcludedKeyword>(
+        r#"
+        INSERT INTO user_excluded_keywords (user_id, keyword)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, keyword) DO NOTHING
+        RETURNING id, user_id, keyword, created_at
+        "#,
+    )
+    .bind(user_id)
+    .bind(keyword)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    match inserted {
+        Some(kw) => Ok((StatusCode::CREATED, Json(kw)).into_response()),
+        None => Err(AppError::InvalidInput("keyword exclusion already exists".to_string())),
+    }
+}
+
+pub async fn delete_excluded_keyword(
+    Path((user_id, keyword_id)): Path<(Uuid, Uuid)>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = sqlx::query(
+        r#"
+        DELETE FROM user_excluded_keywords
+        WHERE user_id = $1 AND id = $2
+        "#,
+    )
+    .bind(user_id)
+    .bind(keyword_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::InvalidInput("excluded keyword not found".to_string()));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn upsert_user_feedback(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(body): Json<UserFeedbackSchema>,
+) -> Result<impl IntoResponse, AppError> {
+    if body.feedback != "relevant" && body.feedback != "not_relevant" {
+        return Err(AppError::InvalidInput(
+            "feedback must be relevant or not_relevant".to_string(),
+        ));
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_article_feedback (user_id, article_id, feedback)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, article_id)
+        DO UPDATE SET
+            feedback = EXCLUDED.feedback,
+            updated_at = CURRENT_TIMESTAMP
+        "#,
+    )
+    .bind(user_id)
+    .bind(body.article_id)
+    .bind(body.feedback)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| AppError::InternalServerError)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn get_user_quality_stats(
+    Path(user_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<Json<UserQualityStats>, AppError> {
+    let total_delivered: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM user_article_delivery
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0);
+
+    let total_feedback: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM user_article_feedback
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0);
+
+    let relevant_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM user_article_feedback
+        WHERE user_id = $1 AND feedback = 'relevant'
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0);
+
+    let not_relevant_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM user_article_feedback
+        WHERE user_id = $1 AND feedback = 'not_relevant'
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0);
+
+    let avg_similarity: Option<f64> = sqlx::query_scalar(
+        r#"
+        SELECT AVG(similarity_score)
+        FROM user_article_delivery
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .ok();
+
+    let relevance_rate = if total_feedback > 0 {
+        (relevant_count as f64 / total_feedback as f64) * 100.0
+    } else {
+        0.0
+    };
+    let feedback_coverage_rate = if total_delivered > 0 {
+        (total_feedback as f64 / total_delivered as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok(Json(UserQualityStats {
+        user_id,
+        total_delivered,
+        total_feedback,
+        relevant_count,
+        not_relevant_count,
+        relevance_rate,
+        feedback_coverage_rate,
+        avg_similarity: avg_similarity.unwrap_or(0.0),
+    }))
 }
