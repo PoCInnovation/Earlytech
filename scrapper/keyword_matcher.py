@@ -8,6 +8,7 @@ This module handles:
 """
 
 import logging
+import os
 from typing import Dict, List, Optional, Any
 import numpy as np
 
@@ -24,7 +25,9 @@ class KeywordMatcher:
         self,
         db_manager: DatabaseManager,
         embedding_manager: EmbeddingManager,
-        similarity_threshold: float = 0.7
+        similarity_threshold: float = 0.7,
+        keyword_augmentation_model: Optional[str] = None,
+        enable_llm_keyword_augmentation: Optional[bool] = None,
     ):
         """
         Initialize the keyword matcher.
@@ -37,6 +40,81 @@ class KeywordMatcher:
         self.db_manager = db_manager
         self.embedding_manager = embedding_manager
         self.similarity_threshold = similarity_threshold
+        self.keyword_augmentation_model = (
+            keyword_augmentation_model
+            or os.getenv("KEYWORD_AUGMENTATION_MODEL", "gpt-4o-mini")
+        )
+        if enable_llm_keyword_augmentation is None:
+            env_value = os.getenv("KEYWORD_AUGMENTATION_USE_LLM", "true").strip().lower()
+            self.enable_llm_keyword_augmentation = env_value in {"1", "true", "yes", "on"}
+        else:
+            self.enable_llm_keyword_augmentation = enable_llm_keyword_augmentation
+        self._llm_client = None
+
+    def augment_keyword_for_embedding(self, keyword: str) -> str:
+        """Expand a short keyword into a natural sentence for embedding."""
+        cleaned_keyword = keyword.strip()
+        if not cleaned_keyword:
+            return keyword
+
+        if self.enable_llm_keyword_augmentation:
+            llm_augmented = self._augment_keyword_with_llm(cleaned_keyword)
+            if llm_augmented:
+                return llm_augmented
+
+        return (
+            "This article discusses "
+            f"{cleaned_keyword}, including practical use cases, recent news, "
+            "technical details, and industry trends."
+        )
+
+    def _augment_keyword_with_llm(self, keyword: str) -> Optional[str]:
+        """Generate an embedding-oriented expansion using a small GPT model."""
+        try:
+            if self._llm_client is None:
+                from openai import OpenAI
+                self._llm_client = OpenAI()
+
+            response = self._llm_client.chat.completions.create(
+                model=self.keyword_augmentation_model,
+                temperature=0.2,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You rewrite search keywords into one concise sentence that is "
+                            "optimized for semantic similarity with tech news or technical "
+                            "articles. Keep the original keyword untouched inside the sentence. "
+                            "Return only the sentence."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Keyword: "
+                            f"{keyword}\n"
+                            "Write one sentence (max 28 words) describing what an article "
+                            "about this keyword would discuss (use cases, announcements, "
+                            "methods, tooling, ecosystem)."
+                        ),
+                    },
+                ],
+            )
+
+            content = (response.choices[0].message.content or "").strip()
+            if not content:
+                return None
+
+            return " ".join(content.split())
+
+        except Exception as e:
+            logger.warning(
+                "LLM keyword augmentation failed for '%s' (model=%s): %s. Falling back to template.",
+                keyword,
+                self.keyword_augmentation_model,
+                e,
+            )
+            return None
 
     def setup_user_keywords(self, user_id: int, keywords: List[str]) -> Dict[int, str]:
         """
@@ -54,8 +132,9 @@ class KeywordMatcher:
         for keyword in keywords:
             try:
                 keyword_id = self.db_manager.add_user_keyword(user_id, keyword)
-                
-                embedding = self.embedding_manager.embed_text(keyword)
+
+                embedding_input = self.augment_keyword_for_embedding(keyword)
+                embedding = self.embedding_manager.embed_text(embedding_input)
                 
                 self.db_manager.store_keyword_embedding(
                     keyword_id=keyword_id,

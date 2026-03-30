@@ -5,6 +5,7 @@ import logging
 
 from database import DatabaseManager
 from embeddings import EmbeddingManager, OpenAIEmbeddingProvider
+from keyword_matcher import KeywordMatcher
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ def main():
     dim = provider.get_dimension() or 1536
     db = DatabaseManager(DB_URL, embedding_dimension=dim)
     em = EmbeddingManager(provider, expected_dimension=dim)
+    matcher = KeywordMatcher(db_manager=db, embedding_manager=em, similarity_threshold=0.25)
 
     with db.get_connection() as conn:
         cur = conn.cursor()
@@ -39,7 +41,8 @@ def main():
 
     for kw in keywords:
         try:
-            embedding = em.embed_text(kw["keyword"])
+            embedding_input = matcher.augment_keyword_for_embedding(kw["keyword"])
+            embedding = em.embed_text(embedding_input)
             db.store_keyword_embedding(
                 keyword_id=str(kw["id"]),
                 user_id=str(kw["user_id"]),
@@ -52,9 +55,6 @@ def main():
 
     # Now dispatch all articles to users
     logger.info("Dispatching articles to users...")
-    from keyword_matcher import KeywordMatcher
-
-    matcher = KeywordMatcher(db_manager=db, embedding_manager=em, similarity_threshold=0.25)
 
     with db.get_connection() as conn:
         cur = conn.cursor()

@@ -6,6 +6,7 @@ mod state;
 
 use dotenv::dotenv;
 use state::AppState;
+use std::env;
 
 #[tokio::main]
 async fn main() {
@@ -23,11 +24,15 @@ async fn main() {
 
     let app = routes::create_router(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let host = env::var("APP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let bind_addr = format!("{}:{}", host, port);
+
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
         .unwrap();
 
-    println!("Server sur http://localhost:3000");
+    println!("Server sur http://{}", bind_addr);
 
     axum::serve(listener, app)
         .await

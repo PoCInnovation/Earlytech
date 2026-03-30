@@ -73,6 +73,49 @@ EarlyTech/
 
 ## 🚀 Getting Started
 
+## 🐳 Démarrage avec Docker Compose
+
+L'ensemble de l'application (PostgreSQL + pgvector, API Rust, Front Next.js, Scrapper Python) peut être lancé avec une seule commande.
+
+### 1. Préparer les variables d'environnement
+
+Exemple minimal:
+
+```bash
+cp .env.docker.example .env
+```
+
+Puis renseigner au moins `OPENAI_API_KEY` et `JWT_SECRET` dans `.env`.
+
+### 2. Lancer toute la stack
+
+```bash
+docker compose up --build -d
+```
+
+Cette commande lance `db + server + front`.
+
+Pour lancer aussi le scrapper en continu:
+
+```bash
+docker compose --profile scrapper up --build -d
+```
+
+### 3. Accès services
+
+- Front: http://localhost:3001
+- API Rust: http://localhost:3000
+- PostgreSQL: localhost:5432
+
+### 4. Logs et arrêt
+
+```bash
+docker compose logs -f
+docker compose down
+```
+
+La migration SQL est automatiquement appliquée au premier démarrage de la base via `migrate.sql`.
+
 ### Prérequis
 
 - Python 3.11+

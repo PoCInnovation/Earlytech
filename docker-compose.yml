@@ -1,0 +1,88 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: earlytech-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-earlytech}
+      POSTGRES_USER: ${POSTGRES_USER:-earlytech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-earlytech}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrate.sql:/docker-entrypoint-initdb.d/01-migrate.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-earlytech} -d ${POSTGRES_DB:-earlytech}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: earlytech-server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-earlytech}:${POSTGRES_PASSWORD:-earlytech}@db:5432/${POSTGRES_DB:-earlytech}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      APP_HOST: 0.0.0.0
+      PORT: 3000
+      RUST_LOG: info
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    ports:
+      - "3000:3000"
+
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: earlytech-front
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_URL: http://server:3000
+      PORT: 3001
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3001/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    ports:
+      - "3001:3001"
+
+  scrapper:
+    build:
+      context: ./scrapper
+      dockerfile: Dockerfile
+    container_name: earlytech-scrapper
+    restart: unless-stopped
+    command: ["python", "main.py", "watch", "--interval", "${SCRAPPER_INTERVAL:-300}"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-earlytech}:${POSTGRES_PASSWORD:-earlytech}@db:5432/${POSTGRES_DB:-earlytech}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      KEYWORD_AUGMENTATION_MODEL: ${KEYWORD_AUGMENTATION_MODEL:-gpt-4o-mini}
+      KEYWORD_AUGMENTATION_USE_LLM: ${KEYWORD_AUGMENTATION_USE_LLM:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    profiles:
+      - scrapper
+
+volumes:
+  postgres_data:
