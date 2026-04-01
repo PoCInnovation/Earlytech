@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-earlytech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-earlytech}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrate.sql:/docker-entrypoint-initdb.d/01-migrate.sql:ro
